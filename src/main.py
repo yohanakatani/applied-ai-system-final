@@ -9,7 +9,7 @@ You will implement the functions in recommender.py:
 - recommend_songs
 """
 
-from src.recommender import load_songs, recommend_songs
+from src.recommender import load_songs, recommend_songs, SCORING_MODES
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +139,23 @@ def main() -> None:
     print("\n\n*** SYSTEM EVALUATION — ADVERSARIAL PROFILES ***")
     for profile in ADVERSARIAL_PROFILES:
         run_profile(songs, profile, k=5)
+
+    # --- Challenge 2: Scoring Mode Comparison ---
+    # Run the Deep Intense Rock profile through every scoring mode so the
+    # differences in ranking strategy are easy to compare side-by-side.
+    demo_profile = ADVERSARIAL_PROFILES[2]  # Deep Intense Rock
+    print("\n\n*** SCORING MODE COMPARISON — Deep Intense Rock profile ***")
+    for mode_name, strategy in SCORING_MODES.items():
+        print(f"\n{'─'*60}")
+        print(f"Mode: {strategy.name}  [{mode_name}]")
+        print(f"  weights → genre={strategy.genre_w}  mood_match={strategy.mood_match_w}"
+              f"  mood_mismatch={strategy.mood_mismatch_w}"
+              f"  energy={strategy.energy_w}x  continuous={strategy.continuous_w}x")
+        print(f"{'─'*60}")
+        recs = recommend_songs(demo_profile, songs, k=5, strategy=strategy)
+        for song, score, explanation in recs:
+            print(f"  {song['title']} ({song['genre']}/{song['mood']}) — {score:.2f}")
+        print()
 
 
 if __name__ == "__main__":

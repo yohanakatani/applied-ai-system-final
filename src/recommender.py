@@ -32,6 +32,143 @@ class UserProfile:
     target_energy: float
     likes_acoustic: bool
 
+# ---------------------------------------------------------------------------
+# Strategy pattern: each scorer is a class with a score() method.
+# Subclasses override weight attributes only — the scoring logic lives once
+# in ScoringStrategy.score(). To add a new mode, subclass and set weights.
+# ---------------------------------------------------------------------------
+
+class ScoringStrategy:
+    """
+    Default balanced scorer. All signals weighted at baseline.
+    genre_w       — flat bonus for genre match
+    mood_match_w  — flat bonus for mood match
+    mood_mismatch_w — penalty when mood does not match (0 = ignore mismatches)
+    energy_w      — multiplier on energy proximity (0–1 base)
+    continuous_w  — multiplier on valence, tempo, loudness, popularity proximity
+    """
+    name = "Balanced"
+    genre_w         = 2.0
+    mood_match_w    = 1.0
+    mood_mismatch_w = -0.5
+    energy_w        = 1.0
+    continuous_w    = 1.0
+
+    def score(self, user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
+        score = 0.0
+        reasons = []
+
+        if song.get("genre") == user_prefs.get("favorite_genre"):
+            score += self.genre_w
+            reasons.append(f"Genre match: {song['genre']}")
+
+        if song.get("mood") == user_prefs.get("favorite_mood"):
+            score += self.mood_match_w
+            reasons.append(f"Mood match: {song['mood']}")
+        elif user_prefs.get("favorite_mood") and self.mood_mismatch_w != 0:
+            score += self.mood_mismatch_w
+            reasons.append(f"Mood mismatch: {song['mood']}")
+
+        target_energy = user_prefs.get("target_energy", 0.5)
+        energy_score = self.energy_w * (1.0 - abs(float(song.get("energy", 0.5)) - target_energy))
+        score += energy_score
+        reasons.append(f"Energy score: {energy_score:.2f}")
+
+        if "target_valence" in user_prefs:
+            vs = self.continuous_w * (1.0 - abs(float(song.get("valence", 0.5)) - user_prefs["target_valence"]))
+            score += vs
+            reasons.append(f"Valence score: {vs:.2f}")
+
+        if "target_tempo" in user_prefs:
+            td = abs(float(song.get("tempo_bpm", 120)) - user_prefs["target_tempo"])
+            ts = self.continuous_w * max(0.0, 1.0 - td / 60.0)
+            score += ts
+            reasons.append(f"Tempo score: {ts:.2f}")
+
+        if user_prefs.get("likes_acoustic") and float(song.get("acousticness", 0.0)) > 0.6:
+            score += 0.5
+            reasons.append("Acoustic preference match")
+
+        if "target_popularity" in user_prefs:
+            ps = self.continuous_w * (1.0 - abs(int(song.get("popularity", 50)) - user_prefs["target_popularity"]) / 100)
+            score += ps
+            reasons.append(f"Popularity score: {ps:.2f}")
+
+        if "preferred_decade" in user_prefs:
+            if int(song.get("release_decade", 2020)) == user_prefs["preferred_decade"]:
+                score += 0.75
+                reasons.append(f"Decade match: {song['release_decade']}s")
+
+        if user_prefs.get("preferred_mood_tag") and song.get("detailed_mood_tag") == user_prefs["preferred_mood_tag"]:
+            score += 0.75
+            reasons.append(f"Detailed mood match: {song['detailed_mood_tag']}")
+
+        if user_prefs.get("avoid_explicit") and int(song.get("explicit", 0)) == 1:
+            score -= 1.0
+            reasons.append("Explicit content penalty")
+
+        if "target_loudness" in user_prefs:
+            ls = self.continuous_w * (1.0 - abs(float(song.get("loudness", 0.5)) - user_prefs["target_loudness"]))
+            score += ls
+            reasons.append(f"Loudness score: {ls:.2f}")
+
+        return (score, reasons)
+
+
+class GenreFirstScorer(ScoringStrategy):
+    """Genre match is worth 4x. Mood mismatches are ignored. Continuous signals halved.
+    Best for listeners who stay strictly within their genre and treat everything else as noise."""
+    name = "Genre-First"
+    genre_w         = 4.0
+    mood_match_w    = 0.5
+    mood_mismatch_w = 0.0
+    energy_w        = 0.5
+    continuous_w    = 0.5
+
+
+class MoodFirstScorer(ScoringStrategy):
+    """Mood match is worth 3x with a strong mismatch penalty. Genre is a secondary tiebreaker.
+    Best for emotionally-driven listeners who want a specific feeling regardless of genre."""
+    name = "Mood-First"
+    genre_w         = 1.0
+    mood_match_w    = 3.0
+    mood_mismatch_w = -1.5
+    energy_w        = 0.5
+    continuous_w    = 0.5
+
+
+class EnergyFocusedScorer(ScoringStrategy):
+    """Energy proximity is the dominant signal at 3x. Genre and mood are minor bonuses.
+    Best for workout or focus sessions where the physical feel of the music matters most."""
+    name = "Energy-Focused"
+    genre_w         = 0.5
+    mood_match_w    = 0.5
+    mood_mismatch_w = 0.0
+    energy_w        = 3.0
+    continuous_w    = 0.5
+
+
+class VibeMatchScorer(ScoringStrategy):
+    """All continuous features (energy, valence, tempo, loudness, popularity) at 2x.
+    Genre and mood are soft tiebreakers only. Best for cross-genre discovery."""
+    name = "Vibe-Match"
+    genre_w         = 1.0
+    mood_match_w    = 1.0
+    mood_mismatch_w = -0.25
+    energy_w        = 2.0
+    continuous_w    = 2.0
+
+
+# Registry — add new strategies here to make them available in main.py
+SCORING_MODES: Dict[str, ScoringStrategy] = {
+    "balanced":      ScoringStrategy(),
+    "genre-first":   GenreFirstScorer(),
+    "mood-first":    MoodFirstScorer(),
+    "energy-focused": EnergyFocusedScorer(),
+    "vibe-match":    VibeMatchScorer(),
+}
+
+
 class Recommender:
     """
     OOP implementation of the recommendation logic.
@@ -83,71 +220,17 @@ def load_songs(csv_path: str) -> List[Dict]:
     return songs
 
 def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
-    """Score one song against user preferences; return (total_score, reasons)."""
-    score = 0.0
-    reasons = []
+    """Score one song using the default Balanced strategy. Kept for backward compatibility."""
+    return ScoringStrategy().score(user_prefs, song)
 
-    if song.get("genre") == user_prefs.get("favorite_genre"):
-        score += 2.0
-        reasons.append(f"Genre match: {song['genre']}")
-
-    if song.get("mood") == user_prefs.get("favorite_mood"):
-        score += 1.0
-        reasons.append(f"Mood match: {song['mood']}")
-    elif user_prefs.get("favorite_mood"):
-        score -= 0.5
-        reasons.append(f"Mood mismatch: {song['mood']}")
-
-    target_energy = user_prefs.get("target_energy", 0.5)
-    energy_score = 1.0 - abs(float(song.get("energy", 0.5)) - target_energy)
-    score += energy_score
-    reasons.append(f"Energy score: {energy_score:.2f}")
-
-    if "target_valence" in user_prefs:
-        valence_score = 1.0 - abs(float(song.get("valence", 0.5)) - user_prefs["target_valence"])
-        score += valence_score
-        reasons.append(f"Valence score: {valence_score:.2f}")
-
-    if "target_tempo" in user_prefs:
-        tempo_diff = abs(float(song.get("tempo_bpm", 120)) - user_prefs["target_tempo"])
-        tempo_score = max(0.0, 1.0 - tempo_diff / 60.0)
-        score += tempo_score
-        reasons.append(f"Tempo score: {tempo_score:.2f}")
-
-    if user_prefs.get("likes_acoustic") and float(song.get("acousticness", 0.0)) > 0.6:
-        score += 0.5
-        reasons.append("Acoustic preference match")
-
-    if "target_popularity" in user_prefs:
-        pop_score = 1.0 - abs(int(song.get("popularity", 50)) - user_prefs["target_popularity"]) / 100
-        score += pop_score
-        reasons.append(f"Popularity score: {pop_score:.2f}")
-
-    if "preferred_decade" in user_prefs:
-        if int(song.get("release_decade", 2020)) == user_prefs["preferred_decade"]:
-            score += 0.75
-            reasons.append(f"Decade match: {song['release_decade']}s")
-
-    if user_prefs.get("preferred_mood_tag") and song.get("detailed_mood_tag") == user_prefs["preferred_mood_tag"]:
-        score += 0.75
-        reasons.append(f"Detailed mood match: {song['detailed_mood_tag']}")
-
-    if user_prefs.get("avoid_explicit") and int(song.get("explicit", 0)) == 1:
-        score -= 1.0
-        reasons.append("Explicit content penalty")
-
-    if "target_loudness" in user_prefs:
-        loudness_score = 1.0 - abs(float(song.get("loudness", 0.5)) - user_prefs["target_loudness"])
-        score += loudness_score
-        reasons.append(f"Loudness score: {loudness_score:.2f}")
-
-    return (score, reasons)
-
-def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, str]]:
-    """Score all songs, sort by score descending, and return the top-k as (song, score, explanation)."""
+def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5,
+                    strategy: Optional[ScoringStrategy] = None) -> List[Tuple[Dict, float, str]]:
+    """Score all songs with the given strategy (default: Balanced), return top-k."""
+    if strategy is None:
+        strategy = ScoringStrategy()
     scored = []
     for song in songs:
-        score, reasons = score_song(user_prefs, song)
+        score, reasons = strategy.score(user_prefs, song)
         explanation = "; ".join(reasons)
         scored.append((song, score, explanation))
 

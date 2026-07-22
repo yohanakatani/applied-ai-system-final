@@ -58,6 +58,67 @@ Follow-up after seeing the plan:
 
 ---
 
+## Agentic Workflow (SF8) — Challenge 2: Multiple Scoring Modes
+
+**What task did you give the agent?**
+
+Design and implement two or more ranking strategies so a user can switch scoring modes in `main.py`. The design should keep the code modular so adding a new strategy in the future doesn't require touching the existing scoring logic.
+
+---
+
+**Prompts used:**
+
+> "Look at recommender.py. I want to add multiple scoring modes — like Genre-First, Mood-First, and Energy-Focused — so a user can switch between them. Suggest a design pattern that keeps this modular and doesn't duplicate the scoring logic. Verify the math stays valid across modes."
+
+The agent proposed the **Strategy pattern**: a base class `ScoringStrategy` with a `score()` method, where subclasses override weight attributes but inherit the full scoring logic. This avoids repeating the formula for energy proximity, valence proximity, etc. in every mode — each subclass just sets different multipliers.
+
+---
+
+**Design pattern chosen: Strategy**
+
+Each scoring mode is a class that inherits from `ScoringStrategy`. The base class holds the complete `score()` method. Subclasses declare five weight attributes and override nothing else:
+
+```
+ScoringStrategy (base)
+├── genre_w         = 2.0   # flat bonus for genre match
+├── mood_match_w    = 1.0   # flat bonus for mood match
+├── mood_mismatch_w = -0.5  # penalty for mood mismatch (0 = ignore)
+├── energy_w        = 1.0   # multiplier on energy proximity
+└── continuous_w    = 1.0   # multiplier on valence/tempo/loudness/popularity
+
+GenreFirstScorer   → genre_w=4.0, continuous_w=0.5, mood_mismatch_w=0.0
+MoodFirstScorer    → mood_match_w=3.0, mood_mismatch_w=-1.5, genre_w=1.0
+EnergyFocusedScorer → energy_w=3.0, genre_w=0.5, mood_mismatch_w=0.0
+VibeMatchScorer    → energy_w=2.0, continuous_w=2.0, genre_w=1.0
+```
+
+A `SCORING_MODES` dict maps string keys (`"genre-first"`, `"mood-first"`, etc.) to instances, so `main.py` can select a mode by name. `recommend_songs()` accepts an optional `strategy` parameter; it defaults to `ScoringStrategy()` for full backward compatibility.
+
+---
+
+**What the agent generated or changed:**
+
+- `src/recommender.py` — replaced the standalone `score_song` logic with `ScoringStrategy.score()`. Added `GenreFirstScorer`, `MoodFirstScorer`, `EnergyFocusedScorer`, `VibeMatchScorer` as subclasses. Added `SCORING_MODES` registry dict. Updated `recommend_songs` signature to accept `strategy`. Kept `score_song` as a one-liner that delegates to `ScoringStrategy()` for test compatibility.
+- `src/main.py` — added a scoring-mode comparison loop that runs the Deep Intense Rock profile through all five modes and prints the top-5 results with the active weights.
+
+---
+
+**What was verified manually:**
+
+- **Math validity across modes:** Every proximity score is computed as `weight * (1.0 - abs(a - b))`. Since `abs(a - b)` is in [0, 1] for all normalized features, the base value before the multiplier is in [0, 1]. Multiplying by any positive weight keeps the result non-negative. The only way to get a negative score is the mood mismatch penalty and the explicit penalty — both intentional.
+
+- **`mood_mismatch_w = 0.0` in Genre-First and Energy-Focused:** Confirmed this correctly skips the penalty branch — the `elif` condition checks `self.mood_mismatch_w != 0` before applying, so mismatches are silently ignored in these modes as intended.
+
+- **`score_song` backward compatibility:** The existing `Recommender.explain_recommendation` calls `score_song`. After the refactor, `score_song` delegates to `ScoringStrategy().score()` — verified the output is identical to the original by running the baseline profile and checking that "Velvet Static" still tops the list with the same explanation string format.
+
+- **Mode comparison output (Deep Intense Rock):**
+  - *Genre-First*: Storm Runner dominates even more; Gym Hero drops to #4 because without mood mismatch penalty and with halved continuous weights, genre is the only real differentiator
+  - *Mood-First*: Gym Hero rises to #2 (it matches `intense` mood); Iron Curtain drops to #3 despite being a better genre/vibe fit, because `angry` ≠ `intense`
+  - *Energy-Focused*: Iron Curtain jumps to #2 (energy=0.97 is almost perfect); rankings tighten because genre no longer dominates
+  - *Vibe-Match*: Scores inflate due to 2x multipliers but relative order makes intuitive sense — Storm Runner still #1, continuous-feature similarity drives the rest
+
+---
+
 ## Design Pattern (SF10)
 
 > Document how AI helped you choose or implement a design pattern.
