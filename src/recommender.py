@@ -73,8 +73,12 @@ def load_songs(csv_path: str) -> List[Dict]:
         for row in reader:
             row["id"] = int(row["id"])
             for field in ("energy", "tempo_bpm", "valence", "danceability",
-                          "acousticness", "liveness", "speechiness", "instrumentalness"):
+                          "acousticness", "liveness", "speechiness", "instrumentalness",
+                          "loudness"):
                 row[field] = float(row[field])
+            row["popularity"] = int(row["popularity"])
+            row["release_decade"] = int(row["release_decade"])
+            row["explicit"] = int(row["explicit"])
             songs.append(row)
     return songs
 
@@ -113,6 +117,29 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
     if user_prefs.get("likes_acoustic") and float(song.get("acousticness", 0.0)) > 0.6:
         score += 0.5
         reasons.append("Acoustic preference match")
+
+    if "target_popularity" in user_prefs:
+        pop_score = 1.0 - abs(int(song.get("popularity", 50)) - user_prefs["target_popularity"]) / 100
+        score += pop_score
+        reasons.append(f"Popularity score: {pop_score:.2f}")
+
+    if "preferred_decade" in user_prefs:
+        if int(song.get("release_decade", 2020)) == user_prefs["preferred_decade"]:
+            score += 0.75
+            reasons.append(f"Decade match: {song['release_decade']}s")
+
+    if user_prefs.get("preferred_mood_tag") and song.get("detailed_mood_tag") == user_prefs["preferred_mood_tag"]:
+        score += 0.75
+        reasons.append(f"Detailed mood match: {song['detailed_mood_tag']}")
+
+    if user_prefs.get("avoid_explicit") and int(song.get("explicit", 0)) == 1:
+        score -= 1.0
+        reasons.append("Explicit content penalty")
+
+    if "target_loudness" in user_prefs:
+        loudness_score = 1.0 - abs(float(song.get("loudness", 0.5)) - user_prefs["target_loudness"])
+        score += loudness_score
+        reasons.append(f"Loudness score: {loudness_score:.2f}")
 
     return (score, reasons)
 

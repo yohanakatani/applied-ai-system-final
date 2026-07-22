@@ -46,6 +46,11 @@ ADVERSARIAL_PROFILES = [
         "target_liveness":         0.14,
         "likes_acoustic":    False,
         "likes_instrumental": False,
+        "target_popularity":   80,
+        "preferred_decade":    2020,
+        "preferred_mood_tag":  "euphoric",
+        "avoid_explicit":      False,
+        "target_loudness":     0.80,
     },
     {
         "name": "Chill Lofi",
@@ -61,6 +66,11 @@ ADVERSARIAL_PROFILES = [
         "target_liveness":         0.07,
         "likes_acoustic":    True,
         "likes_instrumental": True,
+        "target_popularity":   60,
+        "preferred_decade":    2020,
+        "preferred_mood_tag":  "dreamy",
+        "avoid_explicit":      True,
+        "target_loudness":     0.30,
     },
     {
         "name": "Deep Intense Rock",
@@ -76,6 +86,11 @@ ADVERSARIAL_PROFILES = [
         "target_liveness":         0.25,
         "likes_acoustic":    False,
         "likes_instrumental": False,
+        "target_popularity":   65,
+        "preferred_decade":    2010,
+        "preferred_mood_tag":  "aggressive",
+        "avoid_explicit":      False,
+        "target_loudness":     0.88,
     },
 ]
 
