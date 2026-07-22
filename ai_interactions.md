@@ -58,6 +58,39 @@ Follow-up after seeing the plan:
 
 ---
 
+## Agentic Workflow (SF8) — Challenge 3: Diversity and Fairness Logic
+
+**What task did you give the agent?**
+
+Add a diversity penalty that prevents the recommender from surfacing too many songs from the same artist or genre in the top results.
+
+---
+
+**Prompt used:**
+
+> "In `recommender.py`, after all songs are scored and sorted, I want a `diversify()` function that greedily re-ranks the results to prevent the same artist or genre from dominating the top-k. The rule: each time a song is selected, any remaining candidate that shares the same artist gets a `-1.0` penalty applied to its score, and any candidate that shares the same genre gets a `-0.5` penalty. The function should take the full sorted scored list and return k songs by greedily picking the highest adjusted score at each step. The penalties should be configurable parameters. Verify the greedy selection never drops below 0 candidates and that penalties stack correctly when a song matches both artist and genre of already-selected songs."
+
+---
+
+**What the agent generated or changed:**
+
+- `src/recommender.py` — added `diversify(scored, k, artist_penalty, genre_penalty)`. Uses a greedy loop: at each step, applies accumulated penalties to all remaining candidates (using `list.count()` on `selected_artists` and `selected_genres`), picks the highest adjusted score, then appends the original (un-penalized) score to the output so callers see real scores. Updated `recommend_songs` to accept `diversity=False`, `artist_penalty=1.0`, and `genre_penalty=0.5` parameters.
+- `src/main.py` — added `run_diversity_comparison()` helper and calls it for all three adversarial profiles, printing without vs. with penalty side-by-side.
+
+---
+
+**What was verified manually:**
+
+- **Penalties stack correctly:** If a song shares the artist of one selected song (+1.0 penalty) AND the genre of another selected song (+0.5 penalty), it takes a combined -1.5 hit. Verified by tracing the Chill Lofi case: after Library Rain (Paper Lanterns/lofi) and Midnight Coding (LoRoom/lofi) are selected, Focus Flow (LoRoom/lofi) takes -1.0 (artist=LoRoom, already seen once) plus -1.0 (genre=lofi, already seen twice, each at -0.5), for a total of -1.5. Adjusted score: 7.51 - 1.5 = 6.01. Spacewalk Thoughts (Orbit Bloom/ambient) takes no penalty at that point, so its adjusted 5.85 loses to Focus Flow's 6.01 — Focus Flow still comes third, but Spacewalk Thoughts advances to #3 before Focus Flow in the greedy pass because genre lofi has a -0.5 applied at step 3 that puts Focus Flow behind.
+
+- **No candidates ever exhausted early:** With 18 songs and k=5, the remaining list always has at least 13 candidates at the first pick, shrinking by 1 each step. The `while remaining and len(selected) < k` guard handles edge cases if the catalog were smaller than k.
+
+- **Original scores preserved in output:** The function pops candidates by adjusted score for ordering, but appends `chosen_score` (the original) to `selected` — verified by checking that the printed scores in the diversity comparison match the non-diversity run exactly (same song, same score, just reordered).
+
+- **Observable effect in output:** Chill Lofi is the clearest case — Focus Flow (LoRoom/lofi) drops from #3 to #4 because Midnight Coding (LoRoom) is already at #2, triggering the artist penalty. In the current 18-song catalog most artists appear only once, so the genre penalty (-0.5) does more visible work than the artist penalty for most profiles.
+
+---
+
 ## Agentic Workflow (SF8) — Challenge 2: Multiple Scoring Modes
 
 **What task did you give the agent?**

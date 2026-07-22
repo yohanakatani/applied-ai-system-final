@@ -9,7 +9,7 @@ You will implement the functions in recommender.py:
 - recommend_songs
 """
 
-from src.recommender import load_songs, recommend_songs, SCORING_MODES
+from src.recommender import load_songs, recommend_songs, SCORING_MODES, diversify
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +140,10 @@ def main() -> None:
     for profile in ADVERSARIAL_PROFILES:
         run_profile(songs, profile, k=5)
 
+    # --- Challenge 3: Diversity Penalty Comparison ---
+    for profile in ADVERSARIAL_PROFILES:
+        run_diversity_comparison(songs, profile, k=5)
+
     # --- Challenge 2: Scoring Mode Comparison ---
     # Run the Deep Intense Rock profile through every scoring mode so the
     # differences in ranking strategy are easy to compare side-by-side.
@@ -156,6 +160,23 @@ def main() -> None:
         for song, score, explanation in recs:
             print(f"  {song['title']} ({song['genre']}/{song['mood']}) — {score:.2f}")
         print()
+
+
+def run_diversity_comparison(songs, profile, k=5):
+    """Show top-k with and without diversity penalty for the same profile."""
+    name = profile["name"]
+    print(f"\n\n*** DIVERSITY COMPARISON — {name} ***")
+
+    print(f"\n  Without diversity penalty:")
+    without = recommend_songs(profile, songs, k=k, diversity=False)
+    for song, score, _ in without:
+        print(f"    {song['title']} ({song['artist']} / {song['genre']}) — {score:.2f}")
+
+    print(f"\n  With diversity penalty (artist=-1.0, genre=-0.5):")
+    with_div = recommend_songs(profile, songs, k=k, diversity=True,
+                               artist_penalty=1.0, genre_penalty=0.5)
+    for song, score, _ in with_div:
+        print(f"    {song['title']} ({song['artist']} / {song['genre']}) — {score:.2f}")
 
 
 if __name__ == "__main__":

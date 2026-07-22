@@ -223,9 +223,60 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
     """Score one song using the default Balanced strategy. Kept for backward compatibility."""
     return ScoringStrategy().score(user_prefs, song)
 
+def diversify(
+    scored: List[Tuple[Dict, float, str]],
+    k: int = 5,
+    artist_penalty: float = 1.0,
+    genre_penalty: float = 0.5,
+) -> List[Tuple[Dict, float, str]]:
+    """Greedy re-ranking that penalizes repeated artists and genres.
+
+    At each step, every remaining candidate's score is reduced by:
+      artist_penalty  for each already-selected song by the same artist
+      genre_penalty   for each already-selected song in the same genre
+    Penalties stack: a song matching both artist AND genre of a selected song
+    takes both hits simultaneously. Original scores are never mutated.
+    """
+    remaining = list(scored)  # shallow copy so we don't mutate the input
+    selected = []
+    selected_artists: List[str] = []
+    selected_genres: List[str] = []
+
+    while remaining and len(selected) < k:
+        best_idx = 0
+        best_adjusted = None
+
+        for i, (song, base_score, explanation) in enumerate(remaining):
+            artist = song.get("artist", "")
+            genre = song.get("genre", "")
+            penalty = (selected_artists.count(artist) * artist_penalty
+                       + selected_genres.count(genre) * genre_penalty)
+            adjusted = base_score - penalty
+
+            if best_adjusted is None or adjusted > best_adjusted:
+                best_adjusted = adjusted
+                best_idx = i
+
+        chosen_song, chosen_score, chosen_explanation = remaining.pop(best_idx)
+        selected_artists.append(chosen_song.get("artist", ""))
+        selected_genres.append(chosen_song.get("genre", ""))
+        # Store the original score in the tuple so callers see the real score,
+        # not the penalty-adjusted one used only for ordering.
+        selected.append((chosen_song, chosen_score, chosen_explanation))
+
+    return selected
+
+
 def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5,
-                    strategy: Optional[ScoringStrategy] = None) -> List[Tuple[Dict, float, str]]:
-    """Score all songs with the given strategy (default: Balanced), return top-k."""
+                    strategy: Optional[ScoringStrategy] = None,
+                    diversity: bool = False,
+                    artist_penalty: float = 1.0,
+                    genre_penalty: float = 0.5) -> List[Tuple[Dict, float, str]]:
+    """Score all songs with the given strategy (default: Balanced), return top-k.
+
+    If diversity=True, applies greedy artist/genre diversity re-ranking after scoring.
+    artist_penalty and genre_penalty control how strongly repeated artists/genres are penalized.
+    """
     if strategy is None:
         strategy = ScoringStrategy()
     scored = []
@@ -235,4 +286,8 @@ def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5,
         scored.append((song, score, explanation))
 
     scored.sort(key=lambda x: x[1], reverse=True)
+
+    if diversity:
+        return diversify(scored, k=k, artist_penalty=artist_penalty, genre_penalty=genre_penalty)
+
     return scored[:k]
