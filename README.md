@@ -99,18 +99,28 @@ You can add more tests in `tests/test_recommender.py`.
 
 ## Sample Recommendation Output
 
-Paste a sample of your recommender's output here as a text block so a reader can see what it produces:
+User profile: `favorite_genre=r&b, favorite_mood=focused, target_energy=0.55`
 
 ```
-# e.g.:
-# User profile: genre=indie, mood=chill, energy=low
-# Recommendations:
-#   1. ...
-#   2. ...
-#   3. ...
-```
+Loading songs from data/songs.csv...
 
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or demo video link here -->
+Top recommendations:
+
+Velvet Static - Score: 2.97
+Because: Genre match: r&b; Energy score: 0.97
+
+3AM Spiral - Score: 2.76
+Because: Genre match: r&b; Energy score: 0.76
+
+Focus Flow - Score: 1.85
+Because: Mood match: focused; Energy score: 0.85
+
+Midnight Coding - Score: 0.87
+Because: Energy score: 0.87
+
+Cracked Pavement - Score: 0.83
+Because: Energy score: 0.83
+```
 
 ---
 
