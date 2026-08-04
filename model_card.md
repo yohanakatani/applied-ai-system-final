@@ -1,167 +1,323 @@
-# 🎧 Model Card: Music Recommender Simulation
+# Model Card: MoodMatch 2.0
 
-## 1. Model Name
+**System:** Music Recommender — Applied AI System
+**Version:** 2.0 (extends MoodMatch 1.0 from Module 3)
 
-**MoodMatch 1.0**
-
----
-
-## 2. Intended Use
-
-MoodMatch is designed to suggest songs from a small catalog based on a user's taste profile. It is built for classroom exploration — not a production app. It assumes the user can describe what they want (genre, mood, energy level) and returns the five songs that best match those preferences. It should not be used to make real music recommendations for large libraries, and it is not designed to learn from user feedback or adapt over time.
+All numbers in this document were measured by running the current system
+against `data/songs.csv`. Nothing here is estimated.
 
 ---
 
-## 3. How the Model Works
+## 1. Intended Use
 
-Every song in the catalog gets a score. The score is built by adding up points for how well the song matches the user's preferences:
+MoodMatch suggests songs from a small fixed catalog based on a listener's
+stated taste profile, and explains its reasoning in two forms: a per-song
+score breakdown, and a natural-language playlist narrative grounded in the
+songs it retrieved.
 
-- **Genre match** gives the biggest bonus (+2 points) if the song's genre exactly matches what the user listed.
-- **Mood match** gives a smaller bonus (+1 point) if the song's mood matches, or subtracts half a point if it doesn't.
-- **Energy** is scored by how close the song's energy level is to the user's target — a perfect match gives 1 point, a big mismatch gives near 0.
-- **Valence** (how positive or bright a song feels) is scored the same way as energy.
-- **Tempo** (speed in BPM) is scored by closeness too, but differences beyond 60 BPM give 0 points.
-- **Acoustic preference** gives a small bonus (+0.5) if the user likes acoustic songs and the song is highly acoustic.
+It is built for classroom exploration of explainable recommendation, not for
+production use. It has no user history, no collaborative filtering, and does
+not learn from feedback. It should not be used to make real recommendations
+over a large library.
 
-The five highest-scoring songs are returned as recommendations. Everything is rule-based — there is no machine learning involved.
-
----
-
-## 4. Data
-
-The catalog has 18 songs. Each song has a title, artist, genre, mood, and seven numeric features: energy, tempo, valence, danceability, acousticness, liveness, speechiness, and instrumentalness. The catalog covers 13 genres (pop, lofi, rock, r&b, folk, jazz, metal, edm, hip-hop, ambient, synthwave, indie pop, classical) and 12 moods. No songs were added or removed from the starter dataset. The biggest gap is size — 18 songs is too few to give any single genre more than 3 representatives, which limits variety and makes results feel repetitive for users with niche tastes.
+**What is new in 2.0:** input guardrails, a confidence score reported to the
+user, RAG narrative generation with an offline fallback, a JSON audit log, and
+a 46-test reliability suite.
 
 ---
 
-## 5. Strengths
+## 2. How It Works
 
-The system works best when the user's genre and mood are both represented well in the catalog. The Chill Lofi profile is the clearest success — all three lofi songs rank in the top 3, and the results feel genuinely appropriate for a study-session or background-music listener. Energy and valence scoring also work well together: the Deep Intense Rock profile correctly surfaces dark, loud songs and pushes bright-sounding ones down the list, which matches what a real rock fan would expect. The explanation string ("Because: Genre match: rock; Mood match: intense; Energy score: 0.99…") also makes it easy to understand exactly why each song ranked where it did.
+### Retrieval and scoring
+
+Every song in the catalog is scored against the user profile. The score is a
+sum of matched criteria, and each contribution is recorded as a human-readable
+reason:
+
+| Signal | Contribution |
+|---|---|
+| Genre match | +2.0 (flat) |
+| Mood match / mismatch | +1.0 / −0.5 |
+| Energy proximity | `1 − abs(song − target)` |
+| Valence, tempo, loudness, popularity proximity | same proximity formula |
+| Acoustic preference | +0.5 when the user wants acoustic and `acousticness > 0.6` |
+| Decade match | +0.75 |
+| Detailed mood tag match | +0.75 |
+| Explicit content, when avoided | −1.0 |
+
+Five interchangeable strategies reweight these signals: Balanced, Genre-First,
+Mood-First, Energy-Focused, Vibe-Match. An optional greedy re-rank penalizes
+repeated artists (−1.0) and genres (−0.5).
+
+Everything is rule-based arithmetic. There is no machine learning in the
+ranking.
+
+### Generation
+
+The top-k results — and only those — are passed to the narrative generator
+along with their score breakdowns. The prompt forbids inventing songs or
+details not present in that retrieved evidence. If no API key is configured,
+or the API call fails or returns empty, generation falls back to a
+deterministic template built from the same evidence. The system always reports
+which generator produced the text.
+
+### Confidence
+
+`confidence_score()` returns a 0–1 measure of how well the returned playlist
+matched what the user asked for, averaged across the top-k:
+
+```
+per song:  0.4 x genre match  +  0.4 x mood match  +  0.2 x energy proximity
+```
+
+Reported as High (≥0.75), Medium (≥0.45), or Low.
+
+---
+
+## 3. Data
+
+The catalog contains **18 songs**. Measured distribution:
+
+| Genre | Songs | | Mood | Songs |
+|---|---|---|---|---|
+| lofi | 3 | | chill | 3 |
+| pop, folk, r&b | 2 each | | happy, intense, nostalgic, energetic | 2 each |
+| rock, ambient, jazz, synthwave, indie pop, hip-hop, metal, classical, edm | 1 each | | relaxed, moody, focused, sad, romantic, angry, peaceful | 1 each |
+
+- 13 genres, 12 moods across 18 songs
+- Only 2 artists have more than one song (Neon Echo, LoRoom — 2 each)
+- Energy 0.21–0.97, tempo 58–168 BPM, valence 0.22–0.84
+- Decades represented: 2000, 2010, 2020
+- 3 songs flagged explicit
+
+**The single most consequential fact about this dataset:** the largest
+genre-and-mood pair is **2 songs** (lofi/chill and folk/nostalgic). Every other
+combination has at most one. Section 5 shows why this caps the entire system.
+
+---
+
+## 4. Evaluation
+
+Three adversarial profiles, each designed to stress a specific weakness.
+Balanced strategy, k=5. Scores below are current measured output.
+
+### Profile 1 — High-Energy Pop → **Medium confidence (51%)**
+
+Target: pop / happy, energy 0.90, valence 0.85
+
+| # | Song | Artist | Genre/Mood | Energy | Score |
+|---|---|---|---|---|---|
+| 1 | Sunrise City | Neon Echo | pop/happy | 0.82 | 9.14 |
+| 2 | Gym Hero | Max Pulse | pop/intense | 0.93 | 7.69 |
+| 3 | Rooftop Lights | Indigo Parade | indie pop/happy | 0.76 | 7.09 |
+| 4 | Drop Zone | Flux State | edm/energetic | 0.94 | 5.64 |
+| 5 | Neon Jungle | BVSSLINE | hip-hop/energetic | 0.87 | 4.82 |
+
+**Finding:** "Gym Hero" ranks #2 with the *wrong mood*. The flat +2.0 genre
+bonus outweighs the −0.5 mood mismatch penalty by 4x, so any pop song with
+decent energy will beat a correct-mood song from another genre. This is the
+weakness the profile was built to expose, and it reproduces exactly.
+
+### Profile 2 — Chill Lofi → **Medium confidence (67%)**
+
+Target: lofi / chill, energy 0.38, acoustic preferred
+
+| # | Song | Artist | Genre/Mood | Energy | Score |
+|---|---|---|---|---|---|
+| 1 | Library Rain | Paper Lanterns | lofi/chill | 0.35 | 9.86 |
+| 2 | Midnight Coding | LoRoom | lofi/chill | 0.42 | 9.79 |
+| 3 | Focus Flow | LoRoom | lofi/focused | 0.40 | 7.51 |
+| 4 | Spacewalk Thoughts | Orbit Bloom | ambient/chill | 0.28 | 5.85 |
+| 5 | Porch Light | Wren & Oak | folk/nostalgic | 0.33 | 4.68 |
+
+**Finding:** This is the system's best case and it still only reaches 67%. The
+top 2 are genuinely correct. Positions 3–5 degrade in a legible way: #3 is the
+right genre but wrong mood, #4 is the right mood but wrong genre, #5 matches
+neither and is carried entirely by the acoustic bonus and energy proximity.
+
+### Profile 3 — Deep Intense Rock → **Low confidence (43%)**
+
+Target: rock / intense, energy 0.92, valence 0.35 (dark)
+
+| # | Song | Artist | Genre/Mood | Energy | Valence | Score |
+|---|---|---|---|---|---|---|
+| 1 | Storm Runner | Voltline | rock/intense | 0.91 | 0.48 | 9.21 |
+| 2 | Iron Curtain | Deadweight | metal/angry | 0.97 | 0.22 | 5.48 |
+| 3 | Gym Hero | Max Pulse | pop/intense | 0.93 | 0.77 | 4.99 |
+| 4 | Neon Jungle | BVSSLINE | hip-hop/energetic | 0.87 | 0.72 | 4.38 |
+| 5 | Drop Zone | Flux State | edm/energetic | 0.94 | 0.80 | 3.58 |
+
+**Finding:** The Low label is the system working correctly. There is exactly
+one rock song in the catalog, so after position 1 there is nothing left to
+serve this listener. A 3.73-point gap separates #1 from #2. Valence scoring
+does its job — "Iron Curtain" (valence 0.22, genuinely dark) beats brighter
+tracks — but the listener still ends up with a pop gym track at #3.
+
+---
+
+## 5. Reliability Experiments
+
+### Experiment A — Do the five scoring strategies actually change anything?
+
+Ran the Deep Intense Rock profile through all five strategies.
+
+| Strategy | Top-5 order | Confidence |
+|---|---|---|
+| Balanced | Storm Runner, Iron Curtain, Gym Hero, Neon Jungle, Drop Zone | 43% |
+| Genre-First | Storm Runner, Iron Curtain, Neon Jungle, Gym Hero, Drop Zone | 43% |
+| Mood-First | Storm Runner, Gym Hero, Iron Curtain, Neon Jungle, Drop Zone | 43% |
+| Energy-Focused | Storm Runner, Iron Curtain, Neon Jungle, Gym Hero, Drop Zone | 43% |
+| Vibe-Match | Storm Runner, Iron Curtain, Gym Hero, Neon Jungle, Drop Zone | 43% |
+
+**Result: 5 strategies produced 3 distinct orderings but exactly 1 distinct
+set of songs.** Confidence was identical at 43% for all five.
+
+This was the most uncomfortable finding in the evaluation. The strategy
+feature — the largest piece of engineering carried over from Module 3 — is
+close to cosmetic at this catalog size. Reweighting changes what order you see
+the same five songs in; it never changes which five you get. The strategies
+are not broken; there is simply nothing for them to choose between.
+
+### Experiment B — Does diversity re-ranking do anything?
+
+| Profile | Effect of enabling diversity |
+|---|---|
+| High-Energy Pop | No change |
+| Chill Lofi | Swaps positions 3 and 4 (Focus Flow ↔ Spacewalk Thoughts) |
+| Deep Intense Rock | No change |
+
+**Result: no effect on 2 of 3 profiles.** The artist penalty can only fire when
+one artist holds multiple top-k slots, and only two artists in the entire
+catalog have more than one song. The one change observed is real — LoRoom held
+both #2 and #3 for Chill Lofi, so the penalty correctly demoted the second.
+
+### Experiment C — Why does nothing ever reach High confidence?
+
+Swept all 13 genres × 12 moods at k=3 and k=5 — 312 combinations.
+
+**Result: 1 of 312 combinations reached High (≥75%).** Best observed was 84%,
+at lofi/chill with k=3.
+
+Watching a single profile as k shrinks explains it:
+
+| k | lofi/chill confidence |
+|---|---|
+| 1 | 99% — High |
+| 2 | 99% — High |
+| 3 | 86% — High |
+| 5 | 67% — Medium |
+
+The thresholds are not miscalibrated. The catalog is. Since the largest
+genre+mood pair is 2 songs, any request for 5 recommendations *must* pad
+positions 3–5 with partial matches, which drags the average down. At the size
+the system actually runs (k=5), High confidence is unreachable for every
+profile in the catalog.
+
+This is worth stating plainly: **the confidence score is measuring a real
+limitation, but the High band is dead code at k=5.** Either the catalog needs
+to grow, or the bands need recalibrating for small-catalog use.
+
+### Experiment D — Guardrails and failure handling
+
+| Input / condition | Observed behavior |
+|---|---|
+| `target_energy = 99` | Rejected before scoring: "must be a number between 0.0 and 1.0, got: 99.0" |
+| `target_energy = "loud"` | Rejected |
+| Missing `favorite_genre` | Rejected, field named |
+| Genre "polka", mood "smug" | 2 warnings, run continued, confidence 18%, warnings recorded in log |
+| Non-numeric energy at prompt | Falls back to 0.5 with notice |
+| Expired API key (real 401) | Caught, fell back to template, tagged `template (API error: ClientError)` |
+| Simulated network failure | Caught, tagged `template (API error: ConnectionError)` |
+| Model returns empty string | Treated as failure, fell back, tagged `model returned empty response` |
+| No API key at all | Template generator, no crash |
+
+No tested condition produced an unhandled exception.
 
 ---
 
 ## 6. Limitations and Bias
 
-**Dataset size creates a filter bubble for minority genres.** Of the 18 songs in the catalog, 10 genres appear only once (rock, ambient, jazz, synthwave, indie pop, hip-hop, metal, classical, edm, and r&b each have 1–2 songs). A user who prefers any of these genres can earn at most one genre-match bonus (+2.0) before exhausting their entire genre pool, meaning songs #2–5 in their recommendations are always from unrelated genres chosen purely on energy, valence, and tempo proximity. A lofi or folk user faces the same problem in a different direction: lofi has 3 songs and folk has 2, so the top results are almost always the same 3–5 songs regardless of the user's other preferences. The system cannot surface variety it doesn't have, and with only one rock song in the catalog, a rock fan will always see "Storm Runner" at #1 with no competition — the score gap to #2 is so large that no amount of weight tuning changes the outcome. This is a dataset sparsity bias, not a scoring bias: the fix is more songs, not better math.
+**Catalog sparsity is the dominant limitation, and it is not a scoring
+problem.** Nine of thirteen genres have exactly one song. A listener who
+prefers any of them can earn the genre bonus once, then positions 2–5 are
+filled by unrelated songs chosen on numeric proximity alone. Experiments A, B,
+and C above all trace back to this single cause: strategies cannot
+differentiate, diversity has nothing to penalize, and confidence cannot reach
+High. Adding songs would fix all three. Tuning weights would fix none of them.
 
-**Mood is treated as binary.** A song either matches the user's mood exactly (+1) or it doesn't (-0.5). There is no concept of "close enough" — so "angry" and "intense" are penalized the same amount as "angry" and "chill," even though the first pair describes a much more similar listening experience. This makes the system less forgiving than a human curator would be.
+**The genre bonus overwhelms mood.** +2.0 for genre against −0.5 for a mood
+mismatch means genre wins by 4x. Profile 1 demonstrates this concretely: a
+pop/intense track outranks an indie-pop/happy track for a listener who asked
+for pop/happy.
 
-**Several user preference fields are never scored.** The user profile accepts `target_danceability`, `target_speechiness`, `target_liveness`, `target_instrumentalness`, and `likes_instrumental`, but none of these affect the final score. A user who hates vocal tracks and specifically sets `target_instrumentalness: 0.90` will get the same recommendations as a user who loves lyrics — the system silently ignores the difference.
+**Mood matching is binary.** "angry" and "intense" are penalized identically
+to "angry" and "chill," though the first pair describes a far more similar
+listening experience. The system has no notion of adjacent moods.
 
----
+**Confidence is a heuristic, not a calibrated probability.** It measures
+agreement with the stated profile, not predicted enjoyment. A listener who
+describes their taste inaccurately will receive a high-confidence playlist
+they dislike, and the system has no way to detect that.
 
-## 7. Evaluation
+**Several profile fields are still never scored.** `target_danceability`,
+`target_speechiness`, `target_liveness`, `target_instrumentalness`, and
+`likes_instrumental` are accepted by the profile but read by no scorer. A
+listener who sets `target_instrumentalness: 0.90` gets identical results to one
+who ignores it. This was documented in version 1.0 and remains unfixed.
 
-### Profiles Tested
-
-Four user profiles were tested in total: a baseline R&B/focused listener, and three adversarial profiles designed to stress-test specific gaps in the scoring logic.
-
-- **Baseline (R&B/Focused):** A mid-energy listener who prefers R&B with a focused mood and moderate tempo. Used to confirm the system produces sensible results under normal conditions.
-- **High-Energy Pop:** A listener who wants upbeat, happy pop at high energy and bright valence. Designed to test whether the genre bonus overwhelms mood filtering.
-- **Chill Lofi:** A listener who wants quiet, acoustic, and heavily instrumental lofi. Designed to test whether `likes_acoustic` and `target_instrumentalness` are both respected — or only one of them.
-- **Deep Intense Rock:** A listener who wants loud, dark, fast rock. Designed to test the "conflicting preferences" case where high energy and dark valence coexist, and whether the scorer can distinguish a crushing dirge from a triumphant anthem.
-
-### What Was Surprising
-
-The most unexpected result was how often **"Gym Hero" (pop/intense) appeared in unrelated profiles.** It showed up at #2 in both the High-Energy Pop and Deep Intense Rock lists — not because it was a good fit, but because it has the highest energy in the dataset (0.93) and benefits from either a genre match or a mood match in almost any high-energy query. This revealed that a small catalog combined with a strong flat genre bonus creates a "sticky" song that is nearly impossible to displace from the top 3 regardless of how well it actually fits the user.
-
-A second surprise: adding the **mood mismatch penalty (-0.5)** had a much larger visible effect on songs #3–5 than on #1–2. The top songs were already scoring so high that the penalty barely changed their rank — but it reshaped the bottom of the top-5 list significantly, which is where variety and serendipity actually matter to a real user.
-
-### System Evaluation — Adversarial Profile Results
-
-Three adversarial profiles were run to stress-test the scoring logic. Each was designed to expose a specific gap or unexpected behavior.
-
-**Profile 1 — High-Energy Pop**
-*(Target: pop/happy, high energy, bright valence)*
-
-```
-Sunrise City (pop/happy) — Score: 5.74
-  Because: Genre match: pop; Mood match: happy; Energy score: 0.92; Valence score: 0.99; Tempo score: 0.83
-Gym Hero (pop/intense) — Score: 4.82
-  Because: Genre match: pop; Energy score: 0.97; Valence score: 0.92; Tempo score: 0.93
-Rooftop Lights (indie pop/happy) — Score: 3.75
-  Because: Mood match: happy; Energy score: 0.86; Valence score: 0.96; Tempo score: 0.93
-Drop Zone (edm/energetic) — Score: 2.74
-  Because: Energy score: 0.96; Valence score: 0.95; Tempo score: 0.83
-Neon Jungle (hip-hop/energetic) — Score: 2.61
-  Because: Energy score: 0.97; Valence score: 0.87; Tempo score: 0.77
-```
-
-*Observation:* "Gym Hero" (pop/**intense**) ranks #2 despite the wrong mood. The genre bonus (+2.0) is large enough that a mood mismatch cannot push it out of the top results.
+**The LLM narrative is grounded by prompt, not verified by code.** The prompt
+forbids inventing songs, and `test_narrative.py` verifies the *template*
+generator never quotes a song it was not given. The model's output is not
+automatically checked against the retrieved set. A hallucinated detail in LLM
+mode would currently reach the user unflagged.
 
 ---
 
-**Profile 2 — Chill Lofi**
-*(Target: lofi/chill, low energy, high acousticness and instrumentalness)*
+## 7. Future Work
 
-```
-Library Rain (lofi/chill) — Score: 6.40
-  Because: Genre match: lofi; Mood match: chill; Energy score: 0.97; Valence score: 0.98; Tempo score: 0.95; Acoustic preference match
-Midnight Coding (lofi/chill) — Score: 6.39
-  Because: Genre match: lofi; Mood match: chill; Energy score: 0.96; Valence score: 0.98; Tempo score: 0.95; Acoustic preference match
-Focus Flow (lofi/focused) — Score: 5.39
-  Because: Genre match: lofi; Energy score: 0.98; Valence score: 0.99; Tempo score: 0.92; Acoustic preference match
-Spacewalk Thoughts (ambient/chill) — Score: 4.08
-  Because: Mood match: chill; Energy score: 0.90; Valence score: 0.93; Tempo score: 0.75; Acoustic preference match
-Porch Light (folk/nostalgic) — Score: 3.40
-  Because: Energy score: 0.95; Valence score: 0.97; Tempo score: 0.98; Acoustic preference match
-```
+1. **Expand the catalog to 8–10 songs per genre.** This is the single change
+   that would unlock the strategy comparison, diversity re-ranking, and the
+   High confidence band simultaneously. Everything else is secondary.
 
-*Observation:* Top results are intuitive, but `target_instrumentalness: 0.90` is never scored — a song with near-zero instrumentalness would rank identically to a fully instrumental one.
+2. **Verify LLM output against the retrieved set.** Extract quoted song titles
+   from the narrative and assert each appears in the top-k that was passed in —
+   the same grounding check the template generator already passes. This closes
+   the one place where an unverified claim can reach the user.
 
----
+3. **Score the five ignored profile fields**, reusing the existing proximity
+   formula. Small change, direct benefit to lofi, ambient, and classical
+   listeners who care about instrumentalness.
 
-**Profile 3 — Deep Intense Rock**
-*(Target: rock/intense, very high energy, dark valence)*
+4. **Add genre and mood adjacency.** Partial credit for near misses
+   (rock↔metal, lofi↔ambient, intense↔angry) would make positions 3–5 far more
+   defensible than the current all-or-nothing matching.
 
-```
-Storm Runner (rock/intense) — Score: 5.81
-  Because: Genre match: rock; Mood match: intense; Energy score: 0.99; Valence score: 0.87; Tempo score: 0.95
-Gym Hero (pop/intense) — Score: 3.19
-  Because: Mood match: intense; Energy score: 0.99; Valence score: 0.58; Tempo score: 0.62
-Iron Curtain (metal/angry) — Score: 2.60
-  Because: Energy score: 0.95; Valence score: 0.87; Tempo score: 0.78
-Neon Jungle (hip-hop/energetic) — Score: 2.36
-  Because: Energy score: 0.95; Valence score: 0.63; Tempo score: 0.78
-Drop Zone (edm/energetic) — Score: 2.25
-  Because: Energy score: 0.98; Valence score: 0.55; Tempo score: 0.72
-```
-
-*Observation:* Valence scoring meaningfully separates the results — "Iron Curtain" (genuinely dark, valence=0.22) correctly surfaces above brighter-sounding songs. Adding valence scoring directly improved this profile's output.
+5. **Recalibrate the confidence bands for small catalogs**, or report
+   confidence relative to the best achievable score for that request rather
+   than an absolute scale.
 
 ---
 
-### Profile Pair Comparisons
+## 8. Reflection
 
-**High-Energy Pop vs. Chill Lofi**
+The most valuable thing this version added was not the RAG narrative — it was
+the confidence score, because it turned a silent failure into a visible one.
+Version 1.0 returned five songs for a rock listener with exactly the same
+presentation it used for a lofi listener, even though it could genuinely serve
+one and not the other. The ranking was never the problem. The absence of any
+signal about ranking *quality* was.
 
-These two profiles sit at opposite ends of the energy spectrum and produce almost completely non-overlapping results, which is the correct behavior. The Pop profile fills its top 5 with fast, bright, high-valence songs (energy 0.75–0.93); the Lofi profile fills its top 5 with slow, acoustic, low-energy songs (energy 0.21–0.42). The one shared characteristic is that both profiles reward high valence scores — the Pop user wants happy brightness (target 0.85) and the Lofi user wants calm contentment (target 0.58) — but the energy gap is so large that no song satisfies both simultaneously. This confirms that energy is the most effective differentiator between these two listener types in the current scoring system.
+Experiment A was the uncomfortable one. Five scoring strategies, real
+differences in their weights, careful implementation — and they produce one
+distinct set of songs. Nothing was broken. The code did exactly what it said.
+The catalog just never gave it a decision to make. It is easy to mistake
+engineering effort for capability, and the only reason that mistake surfaced
+here is that the evaluation measured the *set* of results and not just the
+ordering.
 
-**High-Energy Pop vs. Deep Intense Rock**
-
-Both profiles want high energy (0.90 and 0.92 respectively) and fast tempo, so their lower-ranked results overlap heavily — "Gym Hero," "Drop Zone," and "Neon Jungle" appear in both top-5 lists. The key difference is valence: the Pop profile targets bright, happy valence (0.85) while the Rock profile targets dark, heavy valence (0.35). This means "Sunrise City" (valence=0.84, pop/happy) dominates the Pop list but would score poorly for Rock, while "Storm Runner" (valence=0.48, rock/intense) tops the Rock list. Without valence scoring, these two profiles would have produced nearly identical results despite describing completely different listeners. This pair demonstrates why adding valence as a scored signal was a meaningful improvement.
-
-**Chill Lofi vs. Deep Intense Rock**
-
-These profiles are the most different of the three pairs and produce zero overlapping songs in their top 5. The Lofi profile gravitates toward slow, acoustic, ambient tracks (Library Rain, Midnight Coding, Spacewalk Thoughts) while the Rock profile gravitates toward loud, high-tempo, low-valence tracks (Storm Runner, Iron Curtain). The contrast also reveals how the `likes_acoustic` bonus shapes the Lofi list — "Porch Light" (folk/nostalgic) reaches #5 purely because it is acoustic, slow, and melodically calm, even though its genre and mood don't match at all. The Rock profile has no equivalent wildcard bonus, so its #3–5 slots are filled by pure numeric proximity on energy and valence alone.
-
----
-
-## 8. Future Work
-
-**1. Score instrumentalness and danceability.** The user profile already accepts these as preferences but `score_song` never reads them. Adding proximity scoring for these two fields — using the same formula already used for energy and valence — would be a small code change with a big impact on lofi, classical, and ambient listeners who specifically want background-friendly, non-vocal music.
-
-**2. Add genre family grouping.** Right now, a genre miss is always a total miss — rock and metal score identically to rock and pop when there is no genre match. Grouping related genres (rock/metal/punk, lofi/ambient/classical, pop/indie pop/edm) and giving partial credit for a "close genre" match would make the fallback results feel far more appropriate.
-
-**3. Expand the catalog.** With only 18 songs and 13 genres, most genres have one representative. Adding 5–10 songs per genre would allow the system to actually differentiate between users who share a genre but have different energy, valence, or tempo preferences — which is currently impossible when there is only one song to pick from.
-
----
-
-## 9. Personal Reflection
-
-**Biggest learning moment:** The biggest "aha" came when I ran the adversarial profiles and saw "Gym Hero" — a pop gym track — show up at #2 for a deep rock listener. Nothing was broken. The math was correct. The weights were doing exactly what I told them to do. That was the uncomfortable part. I had assumed that writing sensible-sounding rules would produce sensible results, but the scoring logic had no idea what a rock fan actually wants. It just counted points. That gap between "the code does what you wrote" and "the code does what you meant" is something I'll think about every time I write a scoring or ranking system.
-
-**How AI tools helped — and when I double-checked:** The AI assistant was genuinely useful for two things: catching the silent data-loss bug (seven user preference fields being accepted but never read), and generating the adversarial profiles with enough variety to stress-test different parts of the logic at once. Where I needed to double-check was the tempo normalization formula. The assistant proposed dividing by 60 BPM as the normalization window, which is a reasonable default, but I had to manually verify against the actual tempo range in the catalog (58–168 BPM) to confirm that a 60-point window would give meaningful scores across the full range rather than bottoming out too fast. The assistant gave me a starting point; reading the actual data gave me confidence it was right.
-
-**What surprised me about simple algorithms "feeling" like recommendations:** The explanation string did most of the heavy lifting. Seeing "Genre match: rock; Mood match: intense; Energy score: 0.99" printed next to a song made the result feel reasoned and intentional — even though the underlying logic is just addition. I think this is what makes even basic recommenders feel believable: not the algorithm itself, but the ability to tell the user *why* something was chosen. Without the explanation, the same ranked list would feel arbitrary. With it, it feels like the system understood you.
-
-**What I'd try next:** The single change I'd most want to make is genre family grouping — giving partial credit when the song's genre is a close neighbor of the user's preference (rock→metal, lofi→ambient, pop→indie pop). Right now a total genre miss is treated the same whether the song is in a related genre or a completely unrelated one, and that produces the weird results at positions #3–5. After that, I'd expand the catalog to at least 10 songs per genre so the system can actually surface variety within a genre — which is impossible right now for anything outside of lofi.
+The graceful-degradation work came out of a genuine failure: the API key
+inherited from Module 4 turned out to be expired, and the first end-to-end run
+returned a 401 error string where a narrative should have been. Building the
+offline fallback was originally a workaround. It ended up being the more
+defensible design — the system now runs for anyone who clones it, and it never
+passes template output off as model output.
