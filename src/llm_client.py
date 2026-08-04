@@ -20,11 +20,20 @@ template output as model output.
 
 import os
 
+from src.context_retriever import format_context_block
+from src.personas import get_persona
 from src.verifier import verify_narrative
 
 # Overridable so the project can be pointed at a different Gemini model
 # without editing code: set GEMINI_MODEL in .env.
 DEFAULT_MODEL_NAME = "gemini-2.0-flash"
+
+# Without an explicit timeout the client waits indefinitely on a stalled
+# connection, which hangs the CLI with no output and no way to recover short of
+# killing the process. Observed in practice while benchmarking the personas.
+# A hung request is functionally identical to a failed one, so it should reach
+# the same fallback path instead of blocking forever.
+DEFAULT_TIMEOUT_SECONDS = 45
 
 
 def _format_retrieved_songs(recommendations: list) -> str:
@@ -137,16 +146,54 @@ class GeminiClient:
             ) from e
 
         self.model_name = os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME)
-        self.client = genai.Client(api_key=api_key)
 
-    def _build_prompt(self, user_prefs: dict, recommendations: list) -> str:
-        """
-        Compose the grounded generation prompt.
+        try:
+            self.timeout_seconds = float(
+                os.getenv("GEMINI_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
+            )
+        except ValueError:
+            self.timeout_seconds = float(DEFAULT_TIMEOUT_SECONDS)
 
-        The quoting rule matters: reserving double quotes for titles and
-        artists is what lets verify_narrative() treat any other quoted string
-        as a fabrication instead of guessing.
+        try:
+            from google.genai import types
+            self.client = genai.Client(
+                api_key=api_key,
+                # HttpOptions takes milliseconds.
+                http_options=types.HttpOptions(timeout=int(self.timeout_seconds * 1000)),
+            )
+        except Exception:
+            # An older client version without HttpOptions support should still
+            # work, just without the timeout guarantee.
+            self.client = genai.Client(api_key=api_key)
+
+    def _build_prompt(
+        self,
+        user_prefs: dict,
+        recommendations: list,
+        context_docs: list = None,
+        persona_key: str = "baseline",
+    ) -> str:
         """
+        Compose the grounded generation prompt from both retrieval sources.
+
+        Songs come from the structured catalog and are the only permitted
+        source of *facts*. Context documents come from the prose corpus and
+        are permitted only as a source of *domain reasoning* — why a listening
+        situation calls for certain properties. Keeping that boundary explicit
+        is what stops the second source from becoming a hallucination surface.
+
+        The quoting rule matters for the same reason: reserving double quotes
+        for titles and artists is what lets verify_narrative() treat any other
+        quoted string as a fabrication instead of guessing.
+        """
+        context_block = ""
+        if context_docs:
+            context_block = f"""
+Background notes retrieved from the reference library. These explain the genre
+and listening situation. Use them to inform your reasoning and vocabulary:
+{format_context_block(context_docs)}
+"""
+
         return f"""You are a music curator explaining a personalized playlist to a listener.
 
 The listener asked for:
@@ -157,12 +204,15 @@ The listener asked for:
 
 The recommender retrieved and scored exactly these songs from its catalog:
 {_format_retrieved_songs(recommendations)}
-
+{context_block}
 Write a 3-5 sentence narrative explaining why this playlist fits the listener.
 
 Rules:
-- Use only the songs and score breakdowns listed above. Do not invent songs,
-  artists, albums, or musical details that are not shown.
+- Every factual claim about a song must come from the scored list above. Do not
+  invent songs, artists, albums, or musical details that are not shown.
+- The background notes describe genres and listening situations in general.
+  Use them for reasoning and vocabulary only. Never attribute a claim from the
+  notes to a specific song, and never quote from the notes.
 - Refer to at least two songs by name.
 - Put double quotes around song titles and artist names, and around nothing
   else. Do not use double quotes for emphasis or for any other phrase.
@@ -170,7 +220,7 @@ Rules:
 - If a pick is a weak or off-target match, say so honestly and explain what
   earned it a place anyway.
 - End with one sentence on when or where this playlist would work best.
-"""
+{get_persona(persona_key).prompt_block()}"""
 
     def _generate(self, prompt: str) -> str:
         """One raw model call. Returns stripped text, possibly empty."""
@@ -180,7 +230,13 @@ Rules:
         )
         return (response.text or "").strip()
 
-    def explain_playlist(self, user_prefs: dict, recommendations: list) -> tuple:
+    def explain_playlist(
+        self,
+        user_prefs: dict,
+        recommendations: list,
+        context_docs: list = None,
+        persona_key: str = "baseline",
+    ) -> tuple:
         """
         RAG generation with a verify-and-correct loop.
 
@@ -198,7 +254,9 @@ Rules:
         if not recommendations:
             return ("No songs matched your preferences well enough to describe.", "none")
 
-        prompt = self._build_prompt(user_prefs, recommendations)
+        prompt = self._build_prompt(
+            user_prefs, recommendations, context_docs, persona_key
+        )
 
         try:
             text = self._generate(prompt)

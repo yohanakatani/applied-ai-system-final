@@ -415,6 +415,123 @@ works, and report what they actually find.
 
 ---
 
+## Stretch: Agentic Workflow — Planning Agent with Reasoning Traces
+
+**What task did you give the agent?**
+
+Turn the fixed score-then-explain pipeline into a loop that decides what to do
+next based on what the previous step produced, and record why.
+
+**Prompts used:**
+
+> "Build a planning agent that chooses a scoring strategy from the shape of the
+> request, notices when the result is weak, and reacts — with the reasoning for
+> every decision saved to a trace."
+
+**What the agent generated or changed:**
+
+- `src/agent.py` — `PlanningAgent.run()` executes eight steps: validate, plan,
+  retrieve, assess, replan, retrieve context, generate, verify.
+- `Trace` and `Step` dataclasses record reasoning, action, and observation for
+  each step, and render to markdown.
+- `src/main.py` — mode 4 runs the agent and prints the trace.
+
+**The two decision points that make it a loop rather than a pipeline:**
+
+1. **Opening strategy** is chosen from the request shape — energy at either
+   extreme selects `energy-focused`, both genre and mood present selects
+   `balanced`, genre alone selects `genre-first`.
+2. **Replanning** triggers when confidence lands below 60%. The agent then runs
+   all five strategies and keeps whichever scores highest — a real branch, and
+   one that can legitimately conclude that nothing better exists.
+
+**Full example trace:** [`logs/traces/example-trace-rock.md`](logs/traces/example-trace-rock.md)
+
+**Abridged — the interesting branch (rock/intense, a request the catalog cannot serve):**
+
+```
+Step 2 — Plan scoring approach
+  Reasoning: Target energy 0.90 sits at an extreme, where energy proximity
+             separates candidates better than genre does.
+  Action:    SCORING_MODES['energy-focused']
+
+Step 4 — Assess result quality
+  Action:      confidence_score(recs, prefs)
+  Observation: Confidence 43% (Low). 1/5 picks match the requested genre.
+
+Step 5 — Replan
+  Reasoning:   Confidence 43% is below the 60% threshold. Before accepting a
+               weak result, check whether a different weighting does better.
+  Action:      recommend_songs(...) across all SCORING_MODES
+  Observation: Tried all 5 strategies (balanced=43%, genre-first=43%,
+               mood-first=43%, energy-focused=43%, vibe-match=43%). None beat
+               energy-focused at 43% — the ceiling is set by the catalog, not
+               the weighting. Keeping the original.
+
+Step 8 — Verify grounding
+  Observation: PASSED — verified (1 entities, 1 scores)
+```
+
+**What was verified manually:**
+
+- **Both branches fire.** rock/intense (43%) enters replanning; lofi/chill
+  (67%) skips it with `"No replanning needed"`. Asserted in
+  `tests/test_agent.py` against the threshold rather than against a hardcoded
+  confidence, so the tests survive scoring changes.
+
+- **Replanning cannot make things worse.** The agent keeps the original result
+  unless an alternative strictly beats it. Verified by test and visible in the
+  trace above, where all five strategies tie and the agent says so instead of
+  switching arbitrarily.
+
+- **The replan independently reproduced Experiment A.** I did not tell the
+  agent that the scoring strategies are nearly interchangeable at this catalog
+  size. It discovered it at runtime and wrote the reason into its own trace:
+  *the ceiling is set by the catalog, not the weighting.* That is the same
+  conclusion the model card reached through a separate sweep.
+
+- **Validation short-circuits.** An out-of-range energy value produces a
+  one-step trace ending in `REJECTED`, so no retrieval work is wasted and the
+  failure is correctly attributed to the request.
+
+---
+
+## Stretch: Test Harness — `evaluate.py`
+
+**What task did you give the agent?**
+
+Build a script that runs the system against fixed inputs and prints a pass/fail
+summary.
+
+**What the agent generated or changed:**
+
+- `evaluate.py` — 38 checks across six sections: guardrails, recommendation
+  quality, determinism, context retrieval, narrative verification, and live LLM
+  generation. Exits non-zero on failure so it is usable in CI.
+- `--no-llm` skips live calls; the LLM section auto-skips when no key is
+  configured, so the harness is fully reproducible offline.
+
+**What was verified manually:**
+
+- **It found a real bug on its first run.** The check
+  `jazz/relaxed retrieves the jazz note` failed, returning `genre-lofi` and
+  `use-studying` instead. Cause: `_build_query()` expanded mid-range energy
+  into "steady background focus study", and those inferred terms outweighed the
+  genre the listener actually stated. Fixed by weighting stated terms (genre
+  3.0, mood 2.0) above inferred ones (1.0). Regression test added as
+  `test_stated_genre_outranks_inferred_energy_vocabulary`.
+
+  This is the clearest argument for the harness existing. The pytest suite
+  passed throughout — it tested that retrieval *worked*, not that it returned
+  the *right* document for a realistic profile.
+
+- **Assertions are ranges, not fixed values.** Confidence checks assert a band
+  (`lofi/chill` in [0.55, 1.00], `rock/intense` in [0.00, 0.50]) plus the
+  relationship between them, so the harness tests calibration rather than
+  memorizing current numbers.
+
+---
+
 ## Bugs Found by Running the System
 
 Recorded separately because every one of these was invisible from reading the

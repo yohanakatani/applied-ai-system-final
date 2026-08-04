@@ -17,5 +17,9 @@ venv/
 # Environment variables — never commit API keys
 .env
 
-# Logs
-logs/
+# Logs — runtime output is not committed, but the example agent traces
+# referenced from ai_interactions.md are.
+logs/*
+!logs/traces/
+logs/traces/*
+!logs/traces/example-*.md

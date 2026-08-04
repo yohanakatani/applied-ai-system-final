@@ -42,13 +42,133 @@ interactively — a single `main()` printed a fixed set of hardcoded profiles.
 
 | Capability | v1.0 | v2.0 |
 |---|---|---|
-| Interactive CLI | No — hardcoded profiles only | Three modes, live user input |
+| Interactive CLI | No — hardcoded profiles only | Four modes, live user input |
 | Input validation | None | Rejects invalid input, warns on unknown values |
 | Output quality signal | None | Confidence score, High/Medium/Low |
 | AI generation | None | RAG narrative grounded in retrieved songs |
 | Hallucination handling | N/A | Verify → correct → fall back |
 | Audit trail | None | Structured JSON log per run |
-| Tests | 2 (both failing) | 70, all passing |
+| Retrieval sources | 1 — `songs.csv` | 2 — plus a prose corpus |
+| Planning | Fixed pipeline | Agent that replans on low confidence |
+| Output style control | None | Four few-shot personas |
+| Evaluation | Manual inspection | `evaluate.py`, 38 automated checks |
+| Tests | 2 (both failing) | 128, all passing |
+
+---
+
+## Extended Features
+
+Four extensions built on top of the required RAG and reliability components.
+
+### 1. Multi-source retrieval
+
+Retrieval originally drew from one source: `data/songs.csv`. It now draws from
+two, answering different questions:
+
+| Source | Type | Retrieval method | Supplies |
+|---|---|---|---|
+| `data/songs.csv` | Structured, 18 rows | Weighted numeric scoring | The facts — which tracks match, and by how much |
+| `data/context/` | Unstructured, 10 documents | IDF-weighted term overlap | The reasoning — what this genre and listening situation are like |
+
+The boundary is enforced in the prompt: songs are the only permitted source of
+factual claims, context is permitted only for reasoning and vocabulary. Without
+that separation the second source becomes a hallucination surface.
+
+**Before** — songs only:
+
+> This playlist emphasizes your interest in lofi with "Library Rain" by "Paper
+> Lanterns", which earned a score of 4.50. [...] This music works best for
+> creating a calm atmosphere while you study.
+
+**After** — songs plus the retrieved `genre-lofi` and `use-studying` notes:
+
+> This selection focuses on the **mellow, instrumental** qualities of lofi to
+> achieve the chill mood you are looking for. [...] Although "Coffee Shop
+> Stories" by "Slow Stereo" is a weak match with a score of 0.98 **because it
+> is jazz with a relaxed mood**, its acoustic nature still aligns with your
+> preferences.
+
+The vocabulary comes from the retrieved genre note. More usefully, the second
+version identifies the *actual* weakest pick and explains why it is weak,
+rather than commenting generically on whichever song came to hand.
+
+### 2. Agentic planning loop
+
+`src/agent.py` replaces the fixed score-then-explain pipeline with an
+eight-step loop that decides what to do next based on the previous step:
+
+```
+validate → plan → retrieve → assess → replan? → context → generate → verify
+```
+
+Two genuine decision points:
+
+- **Opening strategy** is chosen from the request shape. Energy at either
+  extreme selects `energy-focused`; genre and mood both present selects
+  `balanced`.
+- **Replanning** triggers below 60% confidence. The agent runs all five
+  strategies and keeps the best — and can legitimately conclude nothing better
+  exists.
+
+Every run writes a reasoning trace. From the committed example
+([`logs/traces/example-trace-rock.md`](logs/traces/example-trace-rock.md)):
+
+```
+Step 5 — Replan
+  Reasoning:   Confidence 43% is below the 60% threshold. Before accepting a
+               weak result, check whether a different weighting does better.
+  Observation: Tried all 5 strategies (balanced=43%, genre-first=43%,
+               mood-first=43%, energy-focused=43%, vibe-match=43%). None beat
+               energy-focused at 43% — the ceiling is set by the catalog, not
+               the weighting. Keeping the original.
+```
+
+The agent reached that conclusion at runtime without being told. It matches
+what Experiment A in the model card found through a separate offline sweep.
+
+Run it with **mode 4**.
+
+### 3. Few-shot style specialization
+
+`src/personas.py` controls output voice through worked examples rather than
+adjectives — "be concise" is a weak instruction; two concise outputs are a
+strong one. Same playlist, same grounding rules, four voices:
+
+| Persona | Words | Avg sentence | Number density | 2nd person | Verified |
+|---|---|---|---|---|---|
+| Baseline | 73 | 18.2 | 4.1% | 2.7% | yes |
+| **Concise** | **36** | **12.0** | 5.6% | 0.0% | yes |
+| **Analytical** | 70 | 17.5 | **7.1%** | 0.0% | yes |
+| **Warm** | 71 | 17.8 | **0.0%** | **4.2%** | yes |
+
+Each moved in its intended direction: Concise halved the word count,
+Analytical carried the highest number density, Warm used no numbers at all and
+the most second-person address. **Style changed; grounding did not** — all four
+passed verification.
+
+The difference is legible in how each handles the same weak pick:
+
+- **Concise:** `"Coffee Shop Stories" by "Slow Stereo" is a weak 0.98 match that meets the acoustic preference.`
+- **Analytical:** `Scores fall sharply to 2.95 and below for the remaining entries, which are included for energy proximity rather than genre or mood alignment.`
+- **Warm:** `I'll be honest that the rest of the list wanders toward more focused moods or different genres, so you may well skip them.`
+
+Reproduce with `python scripts/compare_personas.py`.
+
+### 4. Evaluation harness
+
+`evaluate.py` runs 38 checks across six sections and exits non-zero on failure,
+so it works in CI.
+
+```bash
+python evaluate.py            # full suite
+python evaluate.py --no-llm   # offline only
+```
+
+It found a real bug on its first run: a jazz listener at mid-range energy
+retrieved the *lofi* note, because inferred energy vocabulary ("steady
+background focus study") outweighed the genre they actually stated. Fixed by
+weighting stated terms above inferred ones. The pytest suite passed throughout
+— it tested that retrieval worked, not that it returned the right document.
 
 ---
 
@@ -112,7 +232,7 @@ Run the tests:
 pytest
 ```
 
-Verified from a clean clone with no `.env` and no network access: **70 passed**.
+Verified from a clean clone with no `.env` and no network access: **128 passed**.
 The full test suite exercises the LLM correction loop using scripted model
 responses, so nothing requires an API key or an internet connection.
 
@@ -395,7 +515,7 @@ against the same data.
 
 ## Testing Summary
 
-`pytest` — **70 tests, all passing**, no network access required.
+`pytest` — **128 tests, all passing**, no network access required.
 
 | File | Covers |
 |---|---|
@@ -529,16 +649,24 @@ applied-ai-system-final/
 ├── diagrams/
 │   └── architecture.mmd       # Mermaid source
 ├── data/
-│   └── songs.csv              # 18-song catalog with audio features
+│   ├── songs.csv              # 18-song catalog with audio features
+│   └── context/               # 10 prose documents — second retrieval source
 ├── src/
-│   ├── main.py                # CLI: three modes
+│   ├── main.py                # CLI: four modes
 │   ├── recommender.py         # Scoring strategies, ranking, diversity re-rank
 │   ├── guardrails.py          # Input validation + confidence scoring
+│   ├── context_retriever.py   # IDF retrieval over the prose corpus
 │   ├── llm_client.py          # RAG generation + verify-and-correct loop
 │   ├── verifier.py            # Grounding checks on generated narratives
+│   ├── agent.py               # Multi-step planning loop + reasoning traces
+│   ├── personas.py            # Few-shot style control + style metrics
 │   └── logger.py              # JSON audit trail
-├── tests/                     # 70 tests
-├── logs/                      # Created on first run (gitignored)
+├── scripts/
+│   └── compare_personas.py    # Measures persona effect on output
+├── evaluate.py                # Evaluation harness — 38 checks
+├── tests/                     # 128 tests
+├── logs/
+│   └── traces/                # Agent traces (example committed)
 ├── model_card.md              # Evaluation, bias analysis, responsible-AI reflection
 ├── ai_interactions.md         # AI-assisted development log
 ├── requirements.txt

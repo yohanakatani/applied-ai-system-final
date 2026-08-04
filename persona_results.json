@@ -1,0 +1,58 @@
+{
+ "baseline": {
+  "text": "This selection is anchored by \"Library Rain\" by \"Paper Lanterns,\" which perfectly matches your lofi and chill preferences with a score of 4.50. We also included \"Midnight Coding\" by \"LoRoom\" to maintain that chill mood, earning a score of 4.43. Although \"Coffee Shop Stories\" by \"Slow Stereo\" is an off-target jazz track with a score of 0.98, it was included to honor your preference for acoustic music. This playlist is ideal for winding down or reading.",
+  "metrics": {
+   "words": 73,
+   "sentences": 4,
+   "avg_sentence_len": 18.2,
+   "numbers": 3,
+   "number_density": 4.11,
+   "second_person": 2,
+   "second_person_density": 2.74
+  },
+  "verified": true,
+  "source": "gemini:gemma-4-26b-a4b-it (verified (6 entities, 3 scores))"
+ },
+ "concise": {
+  "text": "\"Library Rain\" by \"Paper Lanterns\" leads at 4.50. \"Midnight Coding\" by \"LoRoom\" stays lofi and chill, while \"Coffee Shop Stories\" by \"Slow Stereo\" is a weak 0.98 match that meets the acoustic preference. Best for studying or reading.",
+  "metrics": {
+   "words": 36,
+   "sentences": 3,
+   "avg_sentence_len": 12.0,
+   "numbers": 2,
+   "number_density": 5.56,
+   "second_person": 0,
+   "second_person_density": 0.0
+  },
+  "verified": true,
+  "source": "gemini:gemma-4-26b-a4b-it (verified (6 entities, 0 scores))"
+ },
+ "analytical": {
+  "text": "The top two scores cluster at 4.50 and 4.43, with both matching genre and mood. \"Library Rain\" by \"Paper Lanterns\" takes the lead by matching the 0.35 energy target exactly, while \"Midnight Coding\" by \"LoRoom\" follows with a slight energy deviation of 0.42. Scores fall sharply to 2.95 and below for the remaining entries, which are included for energy proximity rather than genre or mood alignment. This playlist is best suited for studying or reading.",
+  "metrics": {
+   "words": 70,
+   "sentences": 4,
+   "avg_sentence_len": 17.5,
+   "numbers": 5,
+   "number_density": 7.14,
+   "second_person": 0,
+   "second_person_density": 0.0
+  },
+  "verified": true,
+  "source": "gemini:gemma-4-26b-a4b-it (verified (4 entities, 0 scores))"
+ },
+ "warm": {
+  "text": "\"Library Rain\" by \"Paper Lanterns\" hits that lofi chill you're after, and \"Midnight Coding\" by \"LoRoom\" carries that same feeling. I'll be honest that the rest of the list wanders toward more focused moods or different genres like ambient and jazz, so you may well skip them. I included them to help keep the overall atmosphere calm. Put this on when you want to settle into some reading or low-stakes work.",
+  "metrics": {
+   "words": 71,
+   "sentences": 4,
+   "avg_sentence_len": 17.8,
+   "numbers": 0,
+   "number_density": 0.0,
+   "second_person": 3,
+   "second_person_density": 4.23
+  },
+  "verified": true,
+  "source": "gemini:gemma-4-26b-a4b-it (verified (4 entities, 0 scores))"
+ }
+}
