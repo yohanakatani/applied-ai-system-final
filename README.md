@@ -1,117 +1,98 @@
-# Music Recommender — Applied AI System
+# MoodMatch — An Explainable Music Recommender
 
-An explainable music recommendation system that retrieves songs from a catalog,
-scores them against a listener's taste profile, and generates a grounded
-natural-language explanation of why the playlist fits.
-
-**Extended from:** Module 3 — Music Recommender Simulation
-**Course:** AI110 — Applied AI
+A recommendation system that does not just rank songs, but tells you **how much
+to trust the ranking** — and verifies its own AI-generated explanations before
+showing them to you.
 
 ---
 
-## What This System Does
+## Summary
 
-You describe what you want to hear — genre, mood, energy level, whether you
-like acoustic music. The system:
+MoodMatch takes a listener's stated taste — genre, mood, energy level, acoustic
+preference — and returns five ranked songs, each with a plain-English breakdown
+of why it scored where it did. It then generates a natural-language narrative
+about the playlist as a whole, and **checks that narrative against the songs it
+actually retrieved** before displaying it. If the language model names a song
+that was never in the results, the system catches it, asks for a correction,
+and discards the output entirely if the correction fails.
 
-1. **Validates** your input and warns you about anything it can't handle
-2. **Retrieves** the song catalog and scores every track against your profile
-3. **Ranks** the results using one of five interchangeable scoring strategies
-4. **Explains** why each song was picked, with a per-song score breakdown
-5. **Narrates** the playlist as a whole using an LLM grounded in the retrieved songs
-6. **Reports a confidence score** so you know how well the catalog actually matched you
-7. **Logs** every run to a JSON audit trail
-
-The point of the system is not just to rank songs — it is to be **honest about
-how good the ranking actually is**. A recommender that returns five bad songs
-with no signal that they're bad is worse than one that says "confidence: low."
+**Why this matters.** Most recommenders present five results identically
+whether they nailed your taste or barely matched it. That silence is the
+problem: a user has no way to distinguish a great match from the best of a bad
+set. MoodMatch reports a confidence score with every result, and when it cannot
+serve a listener well, it says so. The same principle drives the verification
+layer — an AI explanation that sounds fluent but cites a song that does not
+exist is worse than no explanation, because it is confidently wrong.
 
 ---
 
-## The AI Feature: RAG + Reliability
+## The Original Project
 
-This project implements **two** of the required advanced features, both wired
-into the main application path rather than bolted on as standalone scripts.
+This system extends **Module 3 — Music Recommender Simulation**.
 
-### Retrieval-Augmented Generation
+The original was a command-line prototype that represented songs and a user
+taste profile as structured data, then applied a hand-written scoring rule to
+rank them. Its goals were to design a transparent scoring formula, produce
+recommendations with a human-readable reason string for each pick, and evaluate
+where the system's logic broke down. It had no AI integration, no input
+validation, no measure of its own output quality, and no way to run
+interactively — a single `main()` printed a fixed set of hardcoded profiles.
 
-The narrative generator never sees the song catalog. It only sees the songs the
-recommender **retrieved and scored** for this specific user, along with the
-score breakdown explaining each pick:
+**What version 2.0 adds:**
 
-```
-1. "Library Rain" by Paper Lanterns (lofi, chill, energy=0.35) - score 4.47
-   Score breakdown: Genre match: lofi; Mood match: chill; Energy score: 0.97
-```
-
-The prompt explicitly forbids inventing songs or musical details not present in
-the retrieved evidence, and instructs the model to be honest about weak picks.
-This is genuine retrieval-grounded generation: change the retrieval, and the
-narrative changes with it.
-
-### Agentic verify-and-correct loop
-
-A prompt asking for grounding is a request, not a guarantee. The system
-**checks whether the model complied**, and acts on the answer:
-
-1. **Generate** a narrative from the retrieved songs
-2. **Verify** it — every quoted song title and artist must exist in the
-   retrieved set, and every cited score must match a real one
-3. **Correct** — if verification fails, retry once with the specific violation
-   quoted back to the model
-4. **Escalate** — if the retry also fails, discard the model output entirely
-   and fall back to the deterministic generator
-
-The model plans, acts, and checks its own work, with a safe path when
-self-correction doesn't succeed. Observed behavior across all four paths:
-
-| Model behavior | Calls | Result |
+| Capability | v1.0 | v2.0 |
 |---|---|---|
-| Stays grounded | 1 | `gemini:... (verified (2 entities, 0 scores))` |
-| Names "Purple Rain", then corrects | 2 | `gemini:... (verified, after 1 correction)` |
-| Names "Bohemian Rhapsody" twice | 2 | `template (failed verification: unsupported entities: "Bohemian Rhapsody")` |
-| Invents a score of 9.99 | 2 | `template (failed verification: unsupported scores: 9.99)` |
-
-In the failing cases the fabricated song never reaches the user.
-
-**Why the quoting rule exists.** The prompt reserves double quotes for song
-titles and artist names only. That contract is what makes the check reliable
-rather than heuristic — any other quoted string is a fabrication, not a
-guess. The tradeoff is deliberate: if the model quotes a phrase for emphasis
-despite the instruction, the system falls back to the template rather than
-risk passing an unverified claim through. Erring toward the safe generator is
-the correct bias for a trustworthiness feature.
-
-### Reliability and Testing System
-
-| Component | What it does |
-|---|---|
-| `validate_user_prefs()` | Rejects unrecoverable input (missing fields, energy outside 0–1); warns on soft problems (unknown genre, out-of-range tempo) and continues |
-| `confidence_score()` | Scores 0–1 how well the returned playlist matched the stated genre, mood, and energy |
-| `confidence_label()` | Buckets that into High / Medium / Low so the user sees it at a glance |
-| Adversarial profiles | Three profiles designed to stress specific weaknesses, run as a reliability report in mode 3 |
-| `verify_narrative()` | Checks generated narratives against the retrieved songs; unverifiable output never reaches the user |
-| `log_run()` | Appends a structured JSON record of every run for later review |
-| 70 automated tests | Cover validation boundaries, confidence math, narrative grounding, the correction loop, and API-failure fallback |
+| Interactive CLI | No — hardcoded profiles only | Three modes, live user input |
+| Input validation | None | Rejects invalid input, warns on unknown values |
+| Output quality signal | None | Confidence score, High/Medium/Low |
+| AI generation | None | RAG narrative grounded in retrieved songs |
+| Hallucination handling | N/A | Verify → correct → fall back |
+| Audit trail | None | Structured JSON log per run |
+| Tests | 2 (both failing) | 70, all passing |
 
 ---
 
-## Architecture
+## Architecture Overview
 
 ![System architecture](assets/architecture.png)
 
 Mermaid source: [`diagrams/architecture.mmd`](diagrams/architecture.mmd)
 
-The system is five stages: **input guardrails → retrieval → scoring → RAG
-generation → reliability and audit**. Note the fallback edge in stage 4 — if
-the LLM call fails, generation degrades to a deterministic template rather than
-crashing the run.
+The system runs in five stages:
+
+**1 — Input and guardrails.** User preferences hit `validate_user_prefs()`
+before anything else. Unrecoverable problems (a missing field, an energy value
+outside 0–1) stop the run with a specific reason. Soft problems (an unknown
+genre, an out-of-range tempo) produce a warning, and the run continues with the
+warning recorded.
+
+**2 — Retrieval.** The song catalog loads from `data/songs.csv` with numeric
+fields cast to their proper types.
+
+**3 — Scoring and ranking.** Every song is scored against the profile by one of
+five interchangeable strategies. Each scoring decision appends a
+human-readable reason, so the explanation is a byproduct of the scoring rather
+than a separate narrative bolted on afterward. An optional greedy re-rank
+penalizes repeated artists and genres.
+
+**4 — RAG generation with a verify-and-correct loop.** The top-k results — and
+only those — are handed to the narrative generator. The output is verified
+against that same retrieved set. A failure triggers one corrective retry; a
+second failure falls back to a deterministic generator. This is the only stage
+with a cycle in it, and that cycle is the point: the model checks its own work.
+
+**5 — Reliability and audit.** Confidence scoring, JSON logging, and the
+adversarial evaluation profiles that drive mode 3.
+
+The critical design property is that **stage 4 can never introduce information
+that did not come from stage 2**. The generator never sees the catalog, only
+the retrieved subset.
 
 ---
 
 ## Setup
 
-**Requires Python 3.9+**
+**Requires Python 3.9 or newer.**
 
 ```bash
 git clone https://github.com/yohanakatani/applied-ai-system-final.git
@@ -119,50 +100,163 @@ cd applied-ai-system-final
 pip install -r requirements.txt
 ```
 
-### Optional: enable AI narrative generation
+Run it:
 
-The system runs fully without an API key — narrative mode falls back to a
-deterministic offline generator. To enable LLM-generated narratives:
+```bash
+python -m src.main
+```
+
+Run the tests:
+
+```bash
+pytest
+```
+
+### Optional — enable AI narrative generation
+
+**The system runs fully without an API key.** Narrative mode falls back to a
+deterministic offline generator, and every test passes without network access.
+A key only upgrades narrative quality from template-generated to LLM-generated.
+
+To enable it:
 
 1. Get a free Gemini API key at <https://aistudio.google.com/apikey>
-   (a valid key starts with `AIza`)
+   (valid keys begin with `AIza`)
 2. Create a `.env` file in the project root:
 
 ```
 GEMINI_API_KEY=your_key_here
 ```
 
-Optionally pin a different model:
+Optionally pin a specific model:
 
 ```
 GEMINI_MODEL=gemini-2.0-flash
 ```
 
-`.env` is gitignored — your key is never committed.
+`.env` is gitignored, so keys are never committed.
 
 ---
 
-## Running It
+## Sample Interactions
 
-```bash
-python -m src.main
-```
+All transcripts below are real output from the current code.
 
-You get three modes:
+### Example 1 — A request the catalog can serve well
 
-| Mode | What it does |
-|---|---|
-| **1 — Scoring only** | Enter preferences, get ranked songs with per-song reasons and a confidence score |
-| **2 — RAG narrative** | Everything in mode 1, plus a natural-language playlist narrative |
-| **3 — Evaluation** | Runs all three adversarial profiles and prints a reliability report |
-
-### Example: mode 3 output
+**Input:** genre `lofi`, mood `chill`, energy `0.35`, acoustic `y`
 
 ```
 ============================================================
-RELIABILITY EVALUATION — Adversarial Profiles
+Top 5 recommendations  |  Confidence: Medium (67%)
 ============================================================
+  Library Rain by Paper Lanterns
+    Genre: lofi  Mood: chill  Energy: 0.35
+    Score: 4.50  |  Because: Genre match: lofi; Mood match: chill;
+                             Energy score: 1.00; Acoustic preference match
 
+  Midnight Coding by LoRoom
+    Genre: lofi  Mood: chill  Energy: 0.42
+    Score: 4.43  |  Because: Genre match: lofi; Mood match: chill;
+                             Energy score: 0.93; Acoustic preference match
+
+  Focus Flow by LoRoom
+    Genre: lofi  Mood: focused  Energy: 0.40
+    Score: 2.95  |  Because: Genre match: lofi; Mood mismatch: focused;
+                             Energy score: 0.95; Acoustic preference match
+
+  Spacewalk Thoughts by Orbit Bloom
+    Genre: ambient  Mood: chill  Energy: 0.28
+    Score: 2.43  |  Because: Mood match: chill; Energy score: 0.93;
+                             Acoustic preference match
+
+  Coffee Shop Stories by Slow Stereo
+    Genre: jazz  Mood: relaxed  Energy: 0.37
+    Score: 0.98  |  Because: Mood mismatch: relaxed; Energy score: 0.98;
+                             Acoustic preference match
+```
+
+Note how the list degrades legibly. The top two match genre *and* mood. Third
+is the right genre, wrong mood. Fourth is the right mood, wrong genre. Fifth
+matches neither and is carried entirely by energy proximity and the acoustic
+bonus — and the 3.5-point score gap makes that visible without reading the
+reasons.
+
+### Example 2 — A request the catalog *cannot* serve well
+
+**Input:** genre `rock`, mood `intense`, energy `0.9`, acoustic `n`
+
+```
+============================================================
+Top 5 recommendations  |  Confidence: Low (43%)
+============================================================
+  Storm Runner by Voltline
+    Genre: rock  Mood: intense  Energy: 0.91
+    Score: 3.99  |  Because: Genre match: rock; Mood match: intense;
+                             Energy score: 0.99
+
+  Gym Hero by Max Pulse
+    Genre: pop  Mood: intense  Energy: 0.93
+    Score: 1.97  |  Because: Mood match: intense; Energy score: 0.97
+
+  Neon Jungle by BVSSLINE
+    Genre: hip-hop  Mood: energetic  Energy: 0.87
+    Score: 0.47  |  Because: Mood mismatch: energetic; Energy score: 0.97
+```
+
+**This is the system working correctly.** The catalog contains exactly one rock
+song, so after position one there is nothing left to serve this listener. A
+recommender without a confidence score would present this list exactly as it
+presented Example 1. Here the `Low (43%)` label tells the user the truth
+up front.
+
+### Example 3 — Narrative generation
+
+**Input:** same as Example 1, run in mode 2
+
+```
+Playlist Narrative:
+------------------------------------------------------------
+This 5-song playlist is led by "Library Rain" by Paper Lanterns, the
+strongest match at a score of 4.50. 3 of 5 picks are actually in your
+preferred lofi genre. 3 carry the chill mood you asked for. The average
+energy of 0.36 sits right on your 0.35 target. Be aware the tail of the
+list is weaker: "Coffee Shop Stories" scored only 0.98 and is a loose fit.
+
+[generated by: template (API error: ClientError)]
+```
+
+The `[generated by: ...]` tag is always present. This run had no valid API key,
+so the system fell back to the offline generator and **said so** rather than
+passing template output off as model output.
+
+### Example 4 — Guardrails catching bad input
+
+**Input:** genre `polka`, mood `smug`, energy `0.5`
+
+```
+Warnings:
+  ! Unknown genre 'polka'. Known genres: ambient, classical, edm, folk,
+    hip-hop, indie pop, jazz, lofi, metal, pop, r&b, rock, synthwave.
+    Results may be sparse.
+  ! Unknown mood 'smug'. Known moods: aggressive, angry, chill, dreamy,
+    energetic, euphoric, focused, happy, intense, moody, nostalgic, relaxed.
+    Results may be sparse.
+
+Top 5 recommendations  |  Confidence: Low (18%)
+```
+
+Unknown values warn rather than crash, and the resulting 18% confidence
+correctly reflects that nothing in the catalog matched. Hard errors behave
+differently — entering `99` for energy stops the run:
+
+```
+Invalid input: target_energy must be a number between 0.0 and 1.0, got: 99.0
+```
+
+### Example 5 — Reliability report (mode 3)
+
+```
 Profile: High-Energy Pop
   Confidence: Medium (51%)
   Top pick: Sunrise City by Neon Echo (score 9.14)
@@ -182,80 +276,184 @@ Summary:
   Deep Intense Rock      Low      43%  ########
 ```
 
-The Deep Intense Rock profile scoring **Low** is the system working correctly —
-the catalog contains exactly one rock song, so it genuinely cannot serve that
-listener well, and it says so instead of pretending otherwise.
+---
 
-### Example: narrative output
+## Design Decisions
 
-```
-Playlist Narrative:
-------------------------------------------------------------
-This 5-song playlist is led by "Library Rain" by Paper Lanterns, the strongest
-match at a score of 4.47. 3 of 5 picks are actually in your preferred lofi
-genre. 3 carry the chill mood you asked for. The average energy of 0.37 sits
-right on your 0.38 target. Be aware the tail of the list is weaker: "Cracked
-Pavement" scored only 1.00 and is a loose fit.
+### Confidence scoring over silent ranking
 
-[generated by: template (API error: ClientError)]
-```
+**Decision:** report a 0–1 confidence score with every result set.
 
-Note the `[generated by: ...]` tag. The system **always** tells you which
-generator produced the narrative — it never passes template output off as model
-output.
+**Why:** the original system's most serious flaw was not bad rankings — it was
+presenting a rock listener's five results with exactly the same confidence as a
+lofi listener's, when it could genuinely serve one and not the other. Ranking
+quality was invisible.
+
+**Trade-off:** the score is a heuristic (40% genre agreement, 40% mood, 20%
+energy proximity), not a calibrated probability. It measures agreement with the
+stated profile, not predicted enjoyment. A listener who describes their taste
+inaccurately gets a confident playlist they dislike. I accepted this because an
+imperfect quality signal beats none at all.
+
+### Verification over trusting the prompt
+
+**Decision:** mechanically check LLM output against the retrieved songs.
+
+**Why:** an earlier version of this project had a prompt reading "do not invent
+songs" and documentation claiming the narrative was grounded. It was not — it
+was *requested* to be grounded, which is a different claim, and nothing could
+tell the difference. An instruction you cannot verify is a hope.
+
+**Trade-off:** making the check reliable required constraining the prompt —
+double quotes are now reserved for song titles and artist names only, so any
+other quoted string is a fabrication rather than a judgment call. If the model
+quotes a phrase for emphasis anyway, verification fails and the system falls
+back to the template even though nothing was invented. I chose that direction
+deliberately: a needless fallback costs some narrative quality, while a missed
+fabrication costs the user's trust.
+
+### Graceful degradation over hard dependency
+
+**Decision:** the system runs fully without an API key.
+
+**Why:** this began as a workaround. The API key inherited from a previous
+module turned out to be an expired OAuth token, and the first end-to-end run
+returned a 401 error string where a narrative should have been. Building an
+offline generator was the fix.
+
+**Trade-off:** two generators means two code paths to maintain and test. In
+exchange, anyone can clone the repo and get a working system with no
+credentials, the entire test suite runs without network access, and an API
+outage degrades quality instead of breaking the feature. The
+`[generated by: ...]` tag makes the difference visible rather than hiding it.
+
+### Explanations as a byproduct of scoring
+
+**Decision:** build the reason string inside the scoring function.
+
+**Why:** the alternative — generating an explanation after the fact — allows
+the explanation to drift from the actual computation. Appending each reason at
+the moment its points are awarded makes divergence structurally impossible.
+
+**Trade-off:** the reason strings read mechanically ("Energy score: 0.93")
+compared to what a language model would write. That is exactly why the LLM
+narrative layer exists on top: the machine-generated reasons are the ground
+truth, and the narrative is a readable summary of them that gets verified
+against the same data.
 
 ---
 
-## Guardrails and Error Handling
+## Testing Summary
 
-The system is designed so that **no single failure stops a run**:
-
-| Failure | Behavior |
-|---|---|
-| Missing required field | Rejected before scoring, with the field named |
-| Energy outside 0–1 | Rejected with the invalid value echoed back |
-| Unknown genre or mood | Warned, run continues, warning recorded in the log |
-| Non-numeric energy typed at the prompt | Falls back to 0.5 with a notice |
-| No `GEMINI_API_KEY` | Narrative mode uses the offline template generator |
-| Gemini API error, timeout, or 401 | Caught, falls back to template, error type surfaced in the source tag |
-| Model returns empty text | Treated as failure, falls back to template |
-| Model names a song that was never retrieved | Caught by verification, one corrective retry, then template fallback |
-| Model cites a score that does not exist | Caught by verification, same correction path |
-| Windows `cp1252` console | stdout forced to UTF-8 so the CLI renders identically cross-platform |
-
-Every run is appended to `logs/recommendations.log` as one JSON object per line:
-
-```json
-{"timestamp": "2026-08-04T15:22:31.441+00:00", "strategy": "balanced",
- "user_prefs": {"genre": "lofi", "mood": "chill", "energy": 0.38, "likes_acoustic": true},
- "confidence": 0.67,
- "top_results": [{"title": "Library Rain", "artist": "Paper Lanterns", "score": 4.47}],
- "warnings": []}
-```
-
----
-
-## Tests
-
-```bash
-pytest
-```
-
-70 tests, all passing:
+`pytest` — **70 tests, all passing**, no network access required.
 
 | File | Covers |
 |---|---|
-| `tests/test_recommender.py` | Core ranking and explanation behavior |
-| `tests/test_guardrails.py` | Validation boundaries, confidence math, label thresholds |
-| `tests/test_narrative.py` | Narrative grounding, honesty about weak picks, API-failure fallback |
-| `tests/test_verifier.py` | Quote and score extraction, fabrication detection, the correction loop |
-| `tests/test_logger.py` | Audit trail format, append behavior, timezone-aware timestamps |
+| `test_recommender.py` | Ranking order, explanation generation |
+| `test_guardrails.py` | Validation boundaries, confidence math, label thresholds |
+| `test_narrative.py` | Narrative grounding, honesty about weak picks, API-failure fallback |
+| `test_verifier.py` | Quote and score extraction, fabrication detection, correction loop |
+| `test_logger.py` | Audit format, append behavior, timezone-aware timestamps |
 
-The verifier tests drive the correction loop with scripted model responses, so
-the fabrication path is exercised without needing a live API. The key test is
-`test_unverifiable_output_never_reaches_the_user` — it asserts that a model
-insisting on a song that was never retrieved results in that song being absent
-from what the user sees.
+### What worked
+
+**The verify-and-correct loop.** Driven with scripted model responses, all four
+paths behave correctly:
+
+| Model behavior | API calls | Outcome |
+|---|---|---|
+| Stays grounded | 1 | Accepted, `verified (2 entities, 0 scores)` |
+| Names "Purple Rain", then corrects | 2 | Accepted, `after 1 correction` |
+| Names "Bohemian Rhapsody" twice | 2 | Rejected, template, violation named |
+| Cites a fabricated score of 9.99 | 2 | Rejected, `unsupported scores: 9.99` |
+
+In both failing cases the fabricated song is absent from what the user sees.
+
+**Guardrails.** No tested input produced an unhandled exception — including
+non-numeric energy, out-of-range values, missing fields, and unknown
+genres and moods.
+
+### What didn't work
+
+**Both inherited tests were failing.** The `Song` dataclass required three
+fields the test file did not supply, so the suite could not construct a `Song`
+at all. This had been broken and unnoticed.
+
+**The CLI crashed on Windows.** A `UnicodeEncodeError` on box-drawing
+characters under `cp1252` killed the evaluation report mid-print. Anyone
+cloning the repo on Windows would have hit it immediately. Fixed by forcing
+stdout to UTF-8.
+
+**The API key was dead.** Not a wrong model name or a quota issue — a `401`
+at the authentication layer, because the inherited credential was an expired
+OAuth token rather than an API key.
+
+**Two features turned out to be nearly inert.** Running the Deep Intense Rock
+profile through all five scoring strategies produced **three distinct orderings
+but exactly one distinct set of songs**, at identical 43% confidence. Diversity
+re-ranking changed nothing for two of three profiles. Both trace to catalog
+sparsity: with 18 songs, the strategies have nothing to choose between.
+
+**"High" confidence is unreachable.** Sweeping all 13 genres × 12 moods at k=3
+and k=5 — 312 combinations — exactly **one** reached High. The largest
+genre-and-mood pair in the catalog is two songs, so a request for five results
+must pad positions 3–5 with partial matches.
+
+### What I learned
+
+Testing is worth more when it measures the property you actually care about
+than when it measures the thing that is easy to assert. Checking that the
+scoring strategies produced different *orderings* would have passed and told me
+nothing. Checking whether they produced different *sets* revealed that the
+largest feature carried over from the original project barely functions at this
+catalog size. The code was correct; my assumption about what it accomplished
+was not.
+
+The corollary is that running the system beats reasoning about it. Every
+significant bug in this list — the failing tests, the Windows crash, the dead
+key, the inert features — was found by execution, not by reading code.
+
+---
+
+## Reflection
+
+The most valuable thing this project added was not the AI narrative. It was the
+confidence score, because it converted a silent failure into a visible one. The
+original system's rankings were never wrong; the absence of any signal about
+ranking *quality* was the actual defect, and it took building the measurement
+to see it.
+
+Working on the verification layer changed how I read prompt instructions. I had
+written that the narrative was "grounded" when the truth was that grounding had
+been requested and never checked — and I could not tell the difference until I
+built the check. That gap between an instruction and a guarantee is invisible
+from the inside, and closing it required changing the prompt so the guarantee
+could be enforced mechanically.
+
+> **Responsible-AI reflection** — how I collaborated with AI tools, a helpful
+> suggestion and a flawed one, and the system's limitations and biases — is in
+> [`model_card.md`](model_card.md), sections 6 and 8.
+
+---
+
+## Known Limitations
+
+Documented in full in [`model_card.md`](model_card.md).
+
+- **The catalog is 18 songs.** Nine of thirteen genres have exactly one
+  representative. This single fact explains why the scoring strategies cannot
+  differentiate, why diversity re-ranking has nothing to penalize, and why High
+  confidence is unreachable. More songs would fix all three; better math would
+  fix none of them.
+- **The genre bonus overwhelms mood.** +2.0 for a genre match against −0.5 for
+  a mood mismatch means genre wins by 4×, so a wrong-mood song from the right
+  genre can outrank a right-mood song from a neighboring one.
+- **Mood matching is binary.** "angry" and "intense" are penalized as harshly
+  as "angry" and "chill."
+- **Verification covers entities, not reasoning.** A narrative naming only real
+  songs but describing them inaccurately — calling a valence-0.22 track
+  "uplifting" — would pass. Entity grounding is a floor, not a guarantee of
+  truthfulness.
 
 ---
 
@@ -266,11 +464,11 @@ applied-ai-system-final/
 ├── assets/
 │   └── architecture.png       # Rendered architecture diagram
 ├── diagrams/
-│   └── architecture.mmd       # Mermaid source (required deliverable)
+│   └── architecture.mmd       # Mermaid source
 ├── data/
 │   └── songs.csv              # 18-song catalog with audio features
 ├── src/
-│   ├── main.py                # CLI: three modes, wires everything together
+│   ├── main.py                # CLI: three modes
 │   ├── recommender.py         # Scoring strategies, ranking, diversity re-rank
 │   ├── guardrails.py          # Input validation + confidence scoring
 │   ├── llm_client.py          # RAG generation + verify-and-correct loop
@@ -278,35 +476,11 @@ applied-ai-system-final/
 │   └── logger.py              # JSON audit trail
 ├── tests/                     # 70 tests
 ├── logs/                      # Created on first run (gitignored)
-├── model_card.md              # Limitations, bias analysis, evaluation
+├── model_card.md              # Evaluation, bias analysis, responsible-AI reflection
 ├── ai_interactions.md         # AI-assisted development log
 ├── requirements.txt
 └── .env                       # Your API key (gitignored)
 ```
 
----
-
-## Known Limitations
-
-These are real and documented rather than hidden — see `model_card.md` for the
-full analysis.
-
-- **The catalog is 18 songs.** Ten genres have only one or two representatives.
-  A rock listener will always get the same top pick because there is only one
-  rock song. This is why the Deep Intense Rock profile scores Low confidence:
-  the limitation is in the data, not the math.
-- **Mood matching is binary.** "angry" and "intense" are penalized as harshly
-  as "angry" and "chill," even though the first pair is far more similar.
-- **Confidence is a heuristic, not a calibrated probability.** It measures
-  agreement with the stated profile, not whether the listener will actually
-  enjoy the songs.
-- **Verification covers entities and scores, not reasoning.** The verifier
-  catches a fabricated song, artist, or score. It cannot catch a narrative that
-  names only real songs but describes them inaccurately — claiming a track is
-  "upbeat" when its valence is 0.22, for instance. Entity grounding is a floor,
-  not a guarantee of truthfulness.
-- **Strict quoting can cause unnecessary fallbacks.** If the model quotes a
-  phrase for emphasis despite being told not to, verification fails and the
-  system falls back to the template even though nothing was fabricated. This
-  trades some narrative quality for the guarantee that unverified claims are
-  never shown.
+**Built with:** Python 3, pytest, Google Gemini API (`google-genai`),
+python-dotenv, Mermaid.

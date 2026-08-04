@@ -338,7 +338,73 @@ missed fabrication costs the user's trust.
 
 ---
 
-## 8. Reflection
+## 8. Reflection and AI Collaboration
+
+### How I worked with AI tools
+
+I used an AI coding assistant throughout this build, in a pattern that settled
+into: describe the goal, let it draft, then **run the result before believing
+it**. That last step turned out to be the one that mattered. The assistant was
+consistently good at producing plausible, well-organized code and consistently
+willing to describe that code as working before anything had been executed.
+Nearly every real defect in this project was found by running the system, not
+by reading what had been written.
+
+I also used it deliberately for adversarial thinking — asking it to design
+profiles and experiments meant to *break* the recommender rather than confirm
+it worked. That produced Experiments A through C, two of which found genuine
+problems I would not have gone looking for.
+
+### An AI suggestion that was genuinely helpful
+
+When I decided to verify the LLM narrative against the retrieved songs, my
+plan was to write a checker that extracted quoted song titles and looked them
+up. The assistant pointed out that this could not work on its own: given a
+narrative containing `"deep focus"`, no checker can tell whether that is a
+fabricated song title or just a phrase in quotes for emphasis. Any rule I wrote
+would either flag ordinary prose or let real fabrications through.
+
+The suggestion was to change the **prompt** at the same time — reserve double
+quotes for song titles and artist names and nothing else — so that any other
+quoted string is a fabrication by definition rather than a judgment call. That
+turned an unreliable heuristic into a lookup, and it is the reason
+`verify_narrative()` works at all. It reframed the problem: the check and the
+prompt are one mechanism, not a checker bolted onto an existing prompt.
+
+### An AI suggestion that was flawed
+
+When adding LLM support, the assistant proposed reusing the `llm_client.py`
+from my Module 4 project wholesale — carrying over both the model name
+`gemma-4-31b-it` and the API key from that project's `.env`. It then wrote
+setup documentation stating the system ran correctly, before any of it had been
+executed.
+
+Three things were wrong simultaneously:
+
+1. The API key was not an API key. It was an expired OAuth access token
+   (prefix `AQ.`, where real Gemini keys begin `AIza`), so every request
+   returned `401 UNAUTHENTICATED` at the authentication layer.
+2. `gemma-4-31b-it` is not a valid Gemini model identifier.
+3. The claim that the system "runs correctly and reproducibly" was written
+   before a single run had happened.
+
+The same first pass also had `explain_playlist()` return the API error message
+as its return value — meaning a failed call would have printed the string
+`"Could not generate playlist narrative. (ClientError: 401...)"` to the user
+directly beneath the heading **AI Playlist Narrative**, formatted exactly as
+though the error text were the narrative.
+
+All of this surfaced within seconds of actually running the code. The fix was
+the offline fallback generator, the `(narrative, source)` return signature so
+template output can never be mistaken for model output, and making the model
+name configurable rather than hardcoded from another project.
+
+The lesson I took from it: an AI assistant will reproduce your own prior work
+faithfully, including the parts that were already broken, and will describe the
+result confidently. Inherited code is not verified code. Neither is generated
+code, and neither is documentation about code that has never been run.
+
+### What the project taught me
 
 The most valuable thing this version added was not the RAG narrative — it was
 the confidence score, because it turned a silent failure into a visible one.
