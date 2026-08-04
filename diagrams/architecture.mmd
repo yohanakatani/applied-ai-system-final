@@ -1,33 +1,71 @@
 flowchart TD
-    A([User Input\ngenre · mood · energy\nacoustic · valence · tempo]) --> B[UserProfile]
+    subgraph INPUT["1 - Input & Guardrails"]
+        A([User enters preferences<br/>genre - mood - energy - acoustic])
+        A --> V{"validate_user_prefs()"}
+        V -->|"missing field<br/>or energy out of 0-1"| REJ[Reject with reason<br/>run stops safely]
+        V -->|"unknown genre/mood<br/>tempo out of range"| WARN[Collect warnings<br/>continue]
+        V -->|clean| OK[Accepted]
+        WARN --> P[UserProfile]
+        OK --> P
+    end
 
-    B --> C{Scoring\nStrategy}
+    subgraph RETRIEVAL["2 - Retrieval"]
+        D[("data/songs.csv<br/>18-song catalog<br/>genre - mood - energy - valence<br/>tempo - acousticness - loudness")]
+        D --> L["load_songs()"]
+        L --> F[Song records]
+    end
 
-    C --> C1[Balanced]
-    C --> C2[Genre-First]
-    C --> C3[Mood-First]
-    C --> C4[Energy-Focused]
-    C --> C5[Vibe-Match]
+    subgraph SCORING["3 - Scoring & Ranking"]
+        S{"Scoring strategy"}
+        S --> S1[Balanced]
+        S --> S2[Genre-First]
+        S --> S3[Mood-First]
+        S --> S4[Energy-Focused]
+        S --> S5[Vibe-Match]
+        SC["ScoringStrategy.score()<br/>per-song, with reasons"]
+        S1 & S2 & S3 & S4 & S5 --> SC
+        SC --> RANK[Ranked list]
+        RANK --> DIV{"Diversity<br/>re-rank?"}
+        DIV -->|yes| DV["diversify()<br/>penalize repeat<br/>artist / genre"]
+        DIV -->|no| TOPK[Top-K]
+        DV --> TOPK
+    end
 
-    D[(songs.csv\nCatalog — 18 songs\ngenre · mood · energy\nvalence · tempo · BPM\nacousticness · loudness)] --> E[load_songs]
-    E --> F[Song Dicts]
+    subgraph GENERATION["4 - RAG Generation"]
+        G{"GEMINI_API_KEY<br/>configured?"}
+        G -->|yes| GEM["GeminiClient.explain_playlist()<br/>prompt grounded ONLY in<br/>retrieved songs + score reasons"]
+        G -->|no| TPL["build_fallback_narrative()<br/>deterministic, offline"]
+        GEM -->|"API error or<br/>empty response"| TPL
+        GEM --> NARR[Narrative + source label]
+        TPL --> NARR
+    end
 
-    F --> G[score_song\nper-song scoring loop]
-    C1 & C2 & C3 & C4 & C5 --> G
+    subgraph RELIABILITY["5 - Reliability & Audit"]
+        CONF["confidence_score()<br/>genre 0.4 + mood 0.4<br/>+ energy proximity 0.2"]
+        CONF --> LAB["confidence_label()<br/>High / Medium / Low"]
+        LOG["log_run()<br/>JSON audit trail to<br/>logs/recommendations.log"]
+        EVAL["Adversarial profiles<br/>High-Energy Pop<br/>Chill Lofi<br/>Deep Intense Rock"]
+    end
 
-    G --> H[Scored + Ranked List]
+    P --> S
+    F --> SC
+    TOPK --> CONF
+    TOPK --> G
+    TOPK --> LOG
+    LAB --> OUT
+    NARR --> OUT
+    EVAL -.->|"drives mode 3"| P
+    LOG -.->|"replay & review"| EVAL
 
-    H --> I{Diversity\nPenalty?}
-    I -- yes --> J[diversify\ngreedy re-rank\nartist · genre penalty]
-    I -- no --> K[Top-K Slice]
-    J --> K
+    OUT([Results shown to user<br/>ranked songs - per-song reasons<br/>confidence - narrative + its source])
 
-    K --> L[Recommendations\nTitle · Score · Explanation]
-
-    L --> M([User\nsees results +\nwhy each song ranked])
-
-    style A fill:#d0e8ff,stroke:#5599cc
-    style M fill:#d0e8ff,stroke:#5599cc
-    style D fill:#fff3cd,stroke:#cc9900
-    style G fill:#e8f5e9,stroke:#2e7d32
-    style J fill:#fce4ec,stroke:#c62828
+    style A fill:#d0e8ff,stroke:#3a7ca5,color:#0b2b3d
+    style OUT fill:#d0e8ff,stroke:#3a7ca5,color:#0b2b3d
+    style D fill:#fff3cd,stroke:#b8860b,color:#3d2f00
+    style REJ fill:#f8d7da,stroke:#b02a37,color:#4a0d13
+    style WARN fill:#ffe8cc,stroke:#cc7a00,color:#4a2600
+    style GEM fill:#e7d9ff,stroke:#6f42c1,color:#26124d
+    style TPL fill:#d4edda,stroke:#2e7d32,color:#10290f
+    style CONF fill:#d4edda,stroke:#2e7d32,color:#10290f
+    style LOG fill:#e2e3e5,stroke:#5a6268,color:#1f2225
+    style EVAL fill:#e2e3e5,stroke:#5a6268,color:#1f2225

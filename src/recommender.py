@@ -5,7 +5,10 @@ from dataclasses import dataclass
 class Song:
     """
     Represents a song and its attributes.
-    Required by tests/test_recommender.py
+
+    The first ten fields are the core signals every scorer reads. The
+    remaining fields are optional extras that default to neutral values,
+    so a Song can be built from a partial record without breaking scoring.
     """
     id: int
     title: str
@@ -17,9 +20,14 @@ class Song:
     valence: float
     danceability: float
     acousticness: float
-    liveness: float
-    speechiness: float
-    instrumentalness: float
+    liveness: float = 0.0
+    speechiness: float = 0.0
+    instrumentalness: float = 0.0
+    popularity: int = 50
+    release_decade: int = 2020
+    detailed_mood_tag: str = ""
+    explicit: int = 0
+    loudness: float = 0.5
 
 @dataclass
 class UserProfile:

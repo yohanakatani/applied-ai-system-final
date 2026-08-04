@@ -6,7 +6,7 @@ Each entry captures the user profile, top results, confidence score, and timesta
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
@@ -44,7 +44,7 @@ def log_run(
     ]
 
     entry = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "strategy": strategy_name,
         "user_prefs": {
             "genre": user_prefs.get("favorite_genre"),
