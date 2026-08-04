@@ -457,6 +457,247 @@ Summary:
 
 ---
 
+## Reproducible Execution Evidence
+
+Everything below is captured output from the commands shown, on a machine with
+**no API key configured** — so it reproduces from a clean clone. Raw logs are
+committed under [`evidence/`](evidence/).
+
+### Command 1 — full test suite
+
+```bash
+$ pytest
+```
+
+```
+128 passed, 1 warning in 6.82s
+```
+
+No network access required. The LLM correction loop is exercised with scripted
+model responses, so the suite is deterministic and offline.
+Raw log: [`evidence/pytest_output.txt`](evidence/pytest_output.txt)
+
+---
+
+### Command 2 — evaluation harness
+
+```bash
+$ python evaluate.py --no-llm
+```
+
+```
+========================================================================
+MUSIC RECOMMENDER — EVALUATION HARNESS
+========================================================================
+catalog: 18 songs
+
+1. INPUT GUARDRAILS
+------------------------------------------------------------------------
+  [ok]  rejects energy above range
+  [ok]  rejects negative energy
+  [ok]  rejects non-numeric energy
+  [ok]  rejects missing genre
+  [ok]  accepts energy at lower bound
+  [ok]  accepts energy at upper bound
+  [ok]  accepts valid profile
+  [ok]  unknown genre and mood warn but do not reject
+
+2. RECOMMENDATION QUALITY
+------------------------------------------------------------------------
+  [ok]  lofi/chill is well served: returns 5 songs
+  [ok]  lofi/chill is well served: top pick matches requested genre
+  [ok]  lofi/chill is well served: confidence in [0.55, 1.00]
+  [ok]  lofi/chill is well served: results ranked descending
+  [ok]  rock/intense is poorly served (catalog has 1 rock song): returns 5 songs
+  [ok]  rock/intense is poorly served: top pick matches requested genre
+  [ok]  rock/intense is poorly served: confidence in [0.00, 0.50]
+  [ok]  rock/intense is poorly served: results ranked descending
+  [ok]  pop/happy is moderately served: returns 5 songs
+  [ok]  pop/happy is moderately served: top pick matches requested genre
+  [ok]  pop/happy is moderately served: confidence in [0.35, 0.75]
+  [ok]  pop/happy is moderately served: results ranked descending
+  [ok]  confidence separates served from unserved requests
+
+3. DETERMINISM
+------------------------------------------------------------------------
+  [ok]  identical input yields identical ranking
+  [ok]  identical input yields identical scores
+
+4. CONTEXT RETRIEVAL
+------------------------------------------------------------------------
+  [ok]  corpus loads
+  [ok]  lofi/chill retrieves the lofi note
+  [ok]  rock/intense retrieves the rock note
+  [ok]  metal/angry retrieves the metal note
+  [ok]  jazz/relaxed retrieves the jazz note
+  [ok]  energy level steers use-case retrieval
+  [ok]  retrieval returns at most k documents
+
+5. NARRATIVE VERIFICATION
+------------------------------------------------------------------------
+  [ok]  grounded narrative passes
+  [ok]  fabricated song is caught
+  [ok]  fabricated artist is caught
+  [ok]  fabricated score is caught
+  [ok]  correct score passes
+  [ok]  unquoted prose passes
+  [ok]  empty narrative fails
+
+6. LIVE LLM GENERATION
+------------------------------------------------------------------------
+  [--]  live generation
+
+CONFIDENCE BY PROFILE
+------------------------------------------------------------------------
+  lofi/chill       Medium    67%  ####################
+  rock/intense     Low       43%  ############
+  pop/happy        Medium    51%  ###############
+
+========================================================================
+SUMMARY
+========================================================================
+  checks run : 38
+  passed     : 37
+  failed     : 0
+  skipped    : 1
+
+  ALL CHECKS PASSED
+```
+
+Exit code `0`. The one skip is the live-API section, which self-skips without a
+key. Raw log: [`evidence/evaluate_output.txt`](evidence/evaluate_output.txt)
+
+---
+
+### Command 3 — end-to-end run, a request the catalog CANNOT serve
+
+```bash
+$ python -m src.main
+# mode 1, then: rock / intense / 0.9 / n / [enter for balanced]
+```
+
+**Input:** genre `rock`, mood `intense`, energy `0.9`, acoustic `n`
+
+```
+============================================================
+Top 5 recommendations  |  Confidence: Low (43%)
+============================================================
+  Storm Runner by Voltline
+    Genre: rock  Mood: intense  Energy: 0.91
+    Score: 3.99  |  Because: Genre match: rock; Mood match: intense;
+                             Energy score: 0.99
+
+  Gym Hero by Max Pulse
+    Genre: pop  Mood: intense  Energy: 0.93
+    Score: 1.97  |  Because: Mood match: intense; Energy score: 0.97
+
+  Neon Jungle by BVSSLINE
+    Genre: hip-hop  Mood: energetic  Energy: 0.87
+    Score: 0.47  |  Because: Mood mismatch: energetic; Energy score: 0.97
+```
+
+**Reliability behavior:** the `Low (43%)` label is the system correctly
+reporting its own limitation. The catalog contains exactly one rock song, so
+positions 2–5 are filled on energy proximity alone. Compare with the lofi
+request in Sample Interactions above, which reaches `Medium (67%)` from the
+same code path.
+Raw log: [`evidence/run_rock_lowconf.txt`](evidence/run_rock_lowconf.txt)
+
+---
+
+### Command 4 — agentic workflow with reasoning trace
+
+```bash
+$ python -m src.main
+# mode 4, then: rock / intense / 0.9 / n
+```
+
+```
+==================================================================
+AGENT REASONING TRACE
+==================================================================
+
+  Step 2: Plan scoring approach
+    why    : Target energy 0.90 sits at an extreme, where energy
+             proximity separates candidates better than genre does.
+    action : SCORING_MODES['energy-focused']
+
+  Step 4: Assess result quality
+    action : confidence_score(recs, prefs)
+    result : Confidence 43% (Low). 1/5 picks match the requested genre.
+
+  Step 5: Replan
+    why    : Confidence 43% is below the 60% threshold. Before accepting
+             a weak result, check whether a different weighting does better.
+    action : recommend_songs(...) across all SCORING_MODES
+    result : Tried all 5 strategies (balanced=43%, genre-first=43%,
+             mood-first=43%, energy-focused=43%, vibe-match=43%). None beat
+             energy-focused at 43% — the ceiling is set by the catalog, not
+             the weighting. Keeping the original.
+
+  Step 8: Verify grounding
+    result : PASSED — verified (1 entities, 1 scores)
+
+OUTCOME: Presented 5 songs at 43% confidence (Low) using the
+         energy-focused strategy. Narrative verified.
+```
+
+**AI feature behavior:** the agent chose its opening strategy from the request
+shape, assessed its own output, and branched into replanning when confidence
+fell below threshold. It then concluded — at runtime, without being told — that
+the limit is the catalog rather than the weighting.
+Raw log: [`evidence/run_agent_trace.txt`](evidence/run_agent_trace.txt)
+
+---
+
+### Command 5 — guardrails rejecting and warning
+
+**Input:** energy `99`
+
+```
+Invalid input: target_energy must be a number between 0.0 and 1.0, got: 99.0
+```
+
+**Input:** genre `polka`, mood `smug`, energy `0.5`
+
+```
+Warnings:
+  ! Unknown genre 'polka'. Known genres: ambient, classical, edm, folk,
+    hip-hop, indie pop, jazz, lofi, metal, pop, r&b, rock, synthwave.
+  ! Unknown mood 'smug'. Known moods: aggressive, angry, chill, dreamy,
+    energetic, euphoric, focused, happy, intense, moody, nostalgic, relaxed.
+
+Top 5 recommendations  |  Confidence: Low (18%)
+```
+
+Hard errors stop the run and name the offending field. Soft problems warn,
+continue, and are recorded in the JSON audit log — and the confidence score
+independently reflects that nothing matched, at 18%.
+
+---
+
+### Command 6 — hallucination detection
+
+```bash
+$ python -c "from src.verifier import verify_narrative; ..."
+```
+
+Retrieved set: `Library Rain`, `Midnight Coding`, `Focus Flow`
+
+| Narrative under test | Result |
+|---|---|
+| `Led by "Library Rain".` | pass |
+| `"Library Rain" scored 4.50.` | pass |
+| `Try "Purple Rain" instead.` | **CAUGHT** — unsupported entity |
+| `A set by "Taylor Swift".` | **CAUGHT** — unsupported entity |
+| `"Library Rain" scored 99.9.` | **CAUGHT** — unsupported score |
+
+On a failure the model gets one corrective retry with the violation quoted
+back; a second failure discards the output for the deterministic generator.
+A fabricated song never reaches the user.
+
+---
+
 ## Design Decisions
 
 ### Confidence scoring over silent ranking
@@ -601,6 +842,35 @@ was not.
 The corollary is that running the system beats reasoning about it. Every
 significant bug in this list — the failing tests, the Windows crash, the dead
 key, the inert features — was found by execution, not by reading code.
+
+---
+
+## Portfolio Note — what this project says about me as an AI engineer
+
+I care more about knowing whether a system works than about it appearing to.
+The most useful thing I built here was not the AI narrative — it was the
+confidence score, because it converted a silent failure into a visible one, and
+then the verifier, because it turned a claim I had merely *asserted* into one
+the code actually checks. Both came from noticing gaps in my own reasoning
+rather than from a feature list. That instinct also produced the most
+uncomfortable result in this repo: measuring whether my five scoring
+strategies changed the *set* of recommendations, not just their order, showed
+that the largest feature I inherited barely functions at this catalog size. I
+documented that instead of quietly removing it.
+
+The same standard applies to my mistakes, and this project has them on the
+record. I published a confident technical diagnosis that turned out to be
+false, in three separate documents, while disconfirming evidence sat in front
+of me. I nearly shipped a finding drawn from a single sample of stochastic
+output, measured with a statistic confounded by the exact variable under test.
+Both are written into `model_card.md` and `ai_interactions.md` rather than
+edited out, because a system's trustworthiness and its author's are established
+the same way — by showing the work, including the parts that did not hold up.
+What I take into the next project is the habit that caught all of it: run the
+thing, measure the property you actually care about, and check twice before
+calling it a result.
+
+**Repository:** <https://github.com/yohanakatani/applied-ai-system-final>
 
 ---
 

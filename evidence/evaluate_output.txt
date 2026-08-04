@@ -1,0 +1,77 @@
+========================================================================
+MUSIC RECOMMENDER — EVALUATION HARNESS
+========================================================================
+Loading songs from data/songs.csv...
+catalog: 18 songs
+
+1. INPUT GUARDRAILS
+------------------------------------------------------------------------
+  [ok]  rejects energy above range
+  [ok]  rejects negative energy
+  [ok]  rejects non-numeric energy
+  [ok]  rejects missing genre
+  [ok]  accepts energy at lower bound
+  [ok]  accepts energy at upper bound
+  [ok]  accepts valid profile
+  [ok]  unknown genre and mood warn but do not reject
+
+2. RECOMMENDATION QUALITY
+------------------------------------------------------------------------
+  [ok]  lofi/chill is well served: returns 5 songs
+  [ok]  lofi/chill is well served: top pick matches requested genre
+  [ok]  lofi/chill is well served: confidence in [0.55, 1.00]
+  [ok]  lofi/chill is well served: results ranked descending
+  [ok]  rock/intense is poorly served (catalog has 1 rock song): returns 5 songs
+  [ok]  rock/intense is poorly served (catalog has 1 rock song): top pick matches requested genre
+  [ok]  rock/intense is poorly served (catalog has 1 rock song): confidence in [0.00, 0.50]
+  [ok]  rock/intense is poorly served (catalog has 1 rock song): results ranked descending
+  [ok]  pop/happy is moderately served: returns 5 songs
+  [ok]  pop/happy is moderately served: top pick matches requested genre
+  [ok]  pop/happy is moderately served: confidence in [0.35, 0.75]
+  [ok]  pop/happy is moderately served: results ranked descending
+  [ok]  confidence separates served from unserved requests
+
+3. DETERMINISM
+------------------------------------------------------------------------
+  [ok]  identical input yields identical ranking
+  [ok]  identical input yields identical scores
+
+4. CONTEXT RETRIEVAL
+------------------------------------------------------------------------
+  [ok]  corpus loads
+  [ok]  lofi/chill retrieves the lofi note
+  [ok]  rock/intense retrieves the rock note
+  [ok]  metal/angry retrieves the metal note
+  [ok]  jazz/relaxed retrieves the jazz note
+  [ok]  energy level steers use-case retrieval
+  [ok]  retrieval returns at most k documents
+
+5. NARRATIVE VERIFICATION
+------------------------------------------------------------------------
+  [ok]  grounded narrative passes
+  [ok]  fabricated song is caught
+  [ok]  fabricated artist is caught
+  [ok]  fabricated score is caught
+  [ok]  correct score passes
+  [ok]  unquoted prose passes
+  [ok]  empty narrative fails
+
+6. LIVE LLM GENERATION
+------------------------------------------------------------------------
+  [--]  live generation
+
+CONFIDENCE BY PROFILE
+------------------------------------------------------------------------
+  lofi/chill       Medium    67%  ####################
+  rock/intense     Low       43%  ############
+  pop/happy        Medium    51%  ###############
+
+========================================================================
+SUMMARY
+========================================================================
+  checks run : 38
+  passed     : 37
+  failed     : 0
+  skipped    : 1
+
+  ALL CHECKS PASSED

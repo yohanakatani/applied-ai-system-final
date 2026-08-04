@@ -1,0 +1,46 @@
+Music Recommender AI System
+===========================
+
+Loading songs from C:\Users\yohan\Codepath\AI110\applied-ai-system-final\src\..\data\songs.csv...
+Choose a mode:
+  1) Scoring only   — recommendations + confidence score
+  2) RAG narrative  — scoring + playlist narrative (Gemini)
+  3) Evaluation     — adversarial profiles + reliability report
+  4) Agent          — multi-step planning with a reasoning trace
+  q) Quit
+
+Enter choice: 
+Enter your music preferences:
+  Favorite genre (e.g. lofi, pop, rock):   Favorite mood (e.g. chill, happy, intense):   Target energy 0.0–1.0 (e.g. 0.5):   Likes acoustic? (y/n): 
+Scoring strategy (balanced / genre-first / mood-first / energy-focused / vibe-match) [balanced]: 
+============================================================
+Top 5 recommendations  |  Confidence: Low (43%)
+============================================================
+  Storm Runner by Voltline
+    Genre: rock  Mood: intense  Energy: 0.91
+    Score: 3.99  |  Because: Genre match: rock; Mood match: intense; Energy score: 0.99
+
+  Gym Hero by Max Pulse
+    Genre: pop  Mood: intense  Energy: 0.93
+    Score: 1.97  |  Because: Mood match: intense; Energy score: 0.97
+
+  Neon Jungle by BVSSLINE
+    Genre: hip-hop  Mood: energetic  Energy: 0.87
+    Score: 0.47  |  Because: Mood mismatch: energetic; Energy score: 0.97
+
+  Drop Zone by Flux State
+    Genre: edm  Mood: energetic  Energy: 0.94
+    Score: 0.46  |  Because: Mood mismatch: energetic; Energy score: 0.96
+
+  Iron Curtain by Deadweight
+    Genre: metal  Mood: angry  Energy: 0.97
+    Score: 0.43  |  Because: Mood mismatch: angry; Energy score: 0.93
+
+Choose a mode:
+  1) Scoring only   — recommendations + confidence score
+  2) RAG narrative  — scoring + playlist narrative (Gemini)
+  3) Evaluation     — adversarial profiles + reliability report
+  4) Agent          — multi-step planning with a reasoning trace
+  q) Quit
+
+Enter choice: Goodbye.

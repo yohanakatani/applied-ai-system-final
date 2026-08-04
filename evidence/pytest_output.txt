@@ -1,0 +1,9 @@
+........................................................................ [ 56%]
+........................................................                 [100%]
+============================== warnings summary ===============================
+tests/test_narrative.py::test_api_failure_falls_back_instead_of_raising
+  C:\Users\yohan\AppData\Local\Programs\Python\Python314\Lib\site-packages\google\genai\types.py:42: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+128 passed, 1 warning in 5.87s
