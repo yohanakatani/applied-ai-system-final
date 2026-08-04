@@ -262,6 +262,33 @@ the output entirely if it fails again.
 This closes the gap between asking for grounding and enforcing it. Version 1.0
 had neither; the earlier draft of 2.0 asked but did not check.
 
+#### Against live model output
+
+The scripted tests prove the loop reacts correctly to fabrication. They cannot
+answer the more practical question: does a real model *comply* with the quoting
+rule, or does natural phrasing trip the strict check into needless fallbacks?
+
+Once a working key was available, two profiles were run against
+`gemma-4-26b-a4b-it`:
+
+| Profile | Entities checked | Scores checked | Retries | Outcome |
+|---|---|---|---|---|
+| lofi / chill | 6 | 2 | 0 | Verified on first attempt |
+| rock / intense | 4 | 2 | 0 | Verified on first attempt |
+
+Both passed without correction. The model quoted only song titles and artist
+names, and every score it cited matched the retrieved data exactly. It also
+followed the honesty instruction unprompted — the rock narrative volunteered
+that *"Gym Hero" by "Max Pulse" is an off-target pop track*, then explained
+what earned it a place anyway.
+
+Two runs is a small sample and does not establish a rate. What it does
+establish is that the strict quoting contract is workable rather than
+theoretical: it is not so restrictive that ordinary generated prose fails it.
+The concern documented in section 6 — that emphasis quoting could cause
+unnecessary fallbacks — was not observed here, though it remains possible with
+a different model or a more verbose prompt.
+
 ---
 
 ## 6. Limitations and Bias
@@ -456,9 +483,16 @@ says 0.33 — caught only because I checked my own draft against the data.
 **That reading code finds almost nothing.** Every real defect surfaced on
 execution: both inherited tests failing because `Song` required fields they
 never passed, the `UnicodeEncodeError` that killed the Windows CLI mid-print,
-the 401 from a credential that was never an API key, and the first version
-printing an exception string under the heading **AI Playlist Narrative**. I had
-read all of that code. None of it looked wrong.
+the 401 from a dead credential, and the first version printing an exception
+string under the heading **AI Playlist Narrative**. I had read all of that
+code. None of it looked wrong.
+
+**That a confident explanation can be as wrong as broken code, and harder to
+notice.** The 401 was a real observation. The explanation attached to it — that
+the key was an expired OAuth token because it began `AQ.` — was invented, and I
+published it in three documents. Running the code catches broken code. Nothing
+in my process was checking the *reasoning about* the code, and the disconfirming
+evidence sat unexamined for a while because the claim sounded settled.
 
 ### 8.4 How I collaborated with AI tools
 
@@ -499,30 +533,61 @@ from my Module 4 project wholesale — carrying over both the model name
 setup documentation stating the system ran correctly, before any of it had been
 executed.
 
-Three things were wrong simultaneously:
+Two things were genuinely wrong:
 
-1. The API key was not an API key. It was an expired OAuth access token
-   (prefix `AQ.`, where real Gemini keys begin `AIza`), so every request
-   returned `401 UNAUTHENTICATED` at the authentication layer.
-2. `gemma-4-31b-it` is not a valid Gemini model identifier.
-3. The claim that the system "runs correctly and reproducibly" was written
-   before a single run had happened.
+1. The inherited API key was dead. Every request returned
+   `401 UNAUTHENTICATED`, on generation calls and on a bare list-models call
+   alike, so it was failing at authentication rather than anywhere downstream.
+2. The claim that the system "runs correctly and reproducibly" was written into
+   the setup documentation before a single run had happened.
 
 The same first pass also had `explain_playlist()` return the API error message
-as its return value — meaning a failed call would have printed the string
+as its return value — meaning a failed call would have printed
 `"Could not generate playlist narrative. (ClientError: 401...)"` to the user
 directly beneath the heading **AI Playlist Narrative**, formatted exactly as
 though the error text were the narrative.
 
-All of this surfaced within seconds of actually running the code. The fix was
-the offline fallback generator, the `(narrative, source)` return signature so
+All of it surfaced within seconds of actually running the code. The fix was the
+offline fallback generator, the `(narrative, source)` return signature so
 template output can never be mistaken for model output, and making the model
 name configurable rather than hardcoded from another project.
 
-The lesson I took from it: an AI assistant will reproduce your own prior work
-faithfully, including the parts that were already broken, and will describe the
-result confidently. Inherited code is not verified code. Neither is generated
-code, and neither is documentation about code that has never been run.
+#### The flawed suggestion I did not catch until much later
+
+The more instructive failure was the assistant's *diagnosis* of the first one,
+which I accepted and published.
+
+Asked why the key failed, it concluded from the `AQ.` prefix that the value was
+an expired OAuth access token rather than an API key, reasoning that genuine
+Gemini keys begin `AIza` and run about 39 characters. That explanation is
+tidy, technically fluent, and wrong. `AQ.` is Google AI Studio's current API
+key format. It also asserted that `gemma-4-31b-it` — the model name inherited
+from Module 4 — was not a valid identifier. It is; the model exists and the
+API lists it.
+
+Both claims went into this model card, the README, and the interaction log as
+established fact, and I repeated the `AIza` advice several times while helping
+troubleshoot.
+
+What makes this the sharper lesson is that the disconfirming evidence arrived
+before the correction did. A second `AQ.` key authenticated successfully and
+listed 58 models — something an expired OAuth token cannot do. Rather than
+revising the theory, the assistant treated that key as an anomaly and restated
+the original rule. The error only surfaced when I opened the AI Studio key page
+and saw an `AQ.` value sitting under the heading **API Key**.
+
+The pattern worth carrying forward: a confident causal explanation is the
+easiest thing for an AI assistant to produce and the hardest thing to check,
+because it *sounds* like the product of investigation whether or not any
+investigation happened. The 401 was observed. "Because it's an OAuth token" was
+invented to explain it. Only the first of those belonged in documentation, and
+I could not tell them apart at the time because they were delivered in the same
+tone.
+
+The corrected account: the key was dead, most likely revoked or regenerated;
+the model name was always fine; and the offline fallback that came out of the
+episode turned out to matter for an entirely different reason — free-tier daily
+quotas exhaust long before credentials do.
 
 ### 8.5 What this project taught me about AI and problem-solving
 

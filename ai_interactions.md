@@ -227,16 +227,27 @@ After the first end-to-end run failed:
   content — to confirm it was an authentication failure rather than a bad
   model name or a quota limit. Both failed identically.
 
-- **The key was never an API key.** Inspected the format: prefix `AQ.`, length
-  54. Real Gemini API keys begin `AIza` and are ~39 characters. Google's error
-  message asked for "OAuth 2 access token, login cookie or other valid
-  credential," confirming the inherited value was a short-lived OAuth token
-  that had long since expired.
+- **My explanation for *why* it failed was wrong, and I published it.** From the
+  `AQ.` prefix I concluded the value was an expired OAuth token rather than an
+  API key, on the reasoning that real Gemini keys begin `AIza`. That is false —
+  `AQ.` is AI Studio's current API key format. Confirmed later when a different
+  `AQ.` key authenticated and listed 58 models, and definitively when the AI
+  Studio key page showed an `AQ.` value labeled **API Key**. The key was simply
+  dead, probably revoked. Corrected across all three documents.
 
-- **The model name was also wrong.** `gemma-4-31b-it`, copied from Module 4, is
-  not a valid Gemini model identifier. Could not be confirmed against the API
-  because authentication failed first, so the default was changed to
-  `gemini-2.0-flash` and made overridable via `GEMINI_MODEL`.
+- **`gemma-4-31b-it` was a valid model all along.** I claimed it was not a real
+  identifier, having been unable to check it while authentication was failing.
+  Once a working key was available, listing the models showed both
+  `gemma-4-31b-it` and `gemma-4-26b-a4b-it`. The Module 4 model name was never
+  the problem. The default was still changed to `gemini-2.0-flash` and made
+  overridable via `GEMINI_MODEL`, which is the right design regardless.
+
+- **Free-tier quota is per model, per day.** With a working key,
+  `gemini-2.0-flash` returned `429` with quota id
+  `GenerateRequestsPerDayPerProjectPerModel-FreeTier`. Waiting through two
+  25-second backoffs did not clear it, because the exhausted bucket was daily
+  rather than per-minute. Switching `GEMINI_MODEL` to `gemma-4-26b-a4b-it`
+  worked immediately — separate model, separate daily bucket.
 
 - **The first implementation would have shown users an error as if it were a
   narrative.** `explain_playlist()` originally returned the exception string
@@ -413,6 +424,7 @@ code and appeared immediately on execution.
 |---|---|---|
 | Both inherited tests failing | Ran `pytest` for the first time | `Song` required three fields the tests never supplied; gave optional audio features neutral defaults |
 | `UnicodeEncodeError` crash on Windows | Ran mode 3; it died mid-print | `cp1252` cannot encode `─` or `█`; forced stdout to UTF-8 and used ASCII for the bar chart |
-| API key returns 401 | First live Gemini call | Key was an expired OAuth token, not an API key; built the offline fallback |
+| API key returns 401 | First live Gemini call | Key was dead; built the offline fallback |
+| Wrong diagnosis of that 401 published as fact | AI Studio key page showed an `AQ.` key labeled **API Key** | `AQ.` is a real key format; corrected README, model card, and this log |
 | Error string shown as narrative | Read mode 2 output | Returned `(text, source)` and fell back to the template instead |
 | `datetime.utcnow()` deprecated | Python 3.14 deprecation | Switched to `datetime.now(timezone.utc)` |
