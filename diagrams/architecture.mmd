@@ -31,12 +31,18 @@ flowchart TD
         DV --> TOPK
     end
 
-    subgraph GENERATION["4 - RAG Generation"]
+    subgraph GENERATION["4 - RAG Generation with Verify-and-Correct Loop"]
         G{"GEMINI_API_KEY<br/>configured?"}
-        G -->|yes| GEM["GeminiClient.explain_playlist()<br/>prompt grounded ONLY in<br/>retrieved songs + score reasons"]
+        G -->|yes| GEM["GeminiClient._generate()<br/>prompt grounded ONLY in<br/>retrieved songs + score reasons"]
         G -->|no| TPL["build_fallback_narrative()<br/>deterministic, offline"]
         GEM -->|"API error or<br/>empty response"| TPL
-        GEM --> NARR[Narrative + source label]
+
+        GEM --> VER{"verify_narrative()<br/>every quoted title/artist<br/>and cited score must exist<br/>in the retrieved set"}
+        VER -->|passes| NARR[Narrative + source label]
+        VER -->|"fails, 1st time"| RETRY["Retry once<br/>violation quoted back<br/>to the model"]
+        RETRY --> GEM
+        VER -->|"fails again"| TPL
+
         TPL --> NARR
     end
 

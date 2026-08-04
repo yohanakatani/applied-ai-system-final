@@ -21,8 +21,8 @@ not learn from feedback. It should not be used to make real recommendations
 over a large library.
 
 **What is new in 2.0:** input guardrails, a confidence score reported to the
-user, RAG narrative generation with an offline fallback, a JSON audit log, and
-a 46-test reliability suite.
+user, RAG narrative generation with a verify-and-correct loop and an offline
+fallback, a JSON audit log, and a 70-test reliability suite.
 
 ---
 
@@ -56,10 +56,18 @@ ranking.
 
 The top-k results — and only those — are passed to the narrative generator
 along with their score breakdowns. The prompt forbids inventing songs or
-details not present in that retrieved evidence. If no API key is configured,
-or the API call fails or returns empty, generation falls back to a
-deterministic template built from the same evidence. The system always reports
-which generator produced the text.
+details not present in that retrieved evidence, and reserves double quotes for
+song titles and artist names so the output can be checked mechanically.
+
+Generated narratives are then **verified**: every quoted title and artist must
+exist in the retrieved set, and every cited score must match a real one within
+rounding tolerance. A failure triggers one corrective retry with the specific
+violation quoted back to the model; a second failure discards the model output
+in favor of the template. If no API key is configured, or the call fails or
+returns empty, generation goes straight to the deterministic template.
+
+The system always reports which generator produced the text and whether it
+passed verification.
 
 ### Confidence
 
@@ -233,6 +241,27 @@ to grow, or the bands need recalibrating for small-catalog use.
 
 No tested condition produced an unhandled exception.
 
+### Experiment E — Does the grounding claim survive a model that ignores it?
+
+The prompt tells the model to use only the retrieved songs. Experiment E tests
+what happens when it doesn't, by driving the generator with scripted responses
+containing deliberate fabrications.
+
+| Scripted model behavior | API calls | Outcome |
+|---|---|---|
+| Names only retrieved songs | 1 | Accepted, tagged `verified (2 entities, 0 scores)` |
+| Names "Purple Rain", then corrects on retry | 2 | Accepted, tagged `verified ..., after 1 correction` |
+| Names "Bohemian Rhapsody" on both attempts | 2 | Rejected, fell back to template, violation named in tag |
+| Cites a score of 9.99 that does not exist | 2 | Rejected, fell back, `unsupported scores: 9.99` |
+
+**Result: in both failing cases the fabricated song never appeared in the text
+shown to the user.** The system detects the violation, gives the model one
+chance to correct itself with the specific problem quoted back, and discards
+the output entirely if it fails again.
+
+This closes the gap between asking for grounding and enforcing it. Version 1.0
+had neither; the earlier draft of 2.0 asked but did not check.
+
 ---
 
 ## 6. Limitations and Bias
@@ -265,11 +294,20 @@ they dislike, and the system has no way to detect that.
 listener who sets `target_instrumentalness: 0.90` gets identical results to one
 who ignores it. This was documented in version 1.0 and remains unfixed.
 
-**The LLM narrative is grounded by prompt, not verified by code.** The prompt
-forbids inventing songs, and `test_narrative.py` verifies the *template*
-generator never quotes a song it was not given. The model's output is not
-automatically checked against the retrieved set. A hallucinated detail in LLM
-mode would currently reach the user unflagged.
+**Verification covers entities, not reasoning.** `verify_narrative()` checks
+that every quoted song title, artist, and cited score exists in the retrieved
+set, and unverifiable output is discarded rather than shown. What it cannot
+catch is a narrative that names only real songs but characterizes them wrongly
+— describing a track as "uplifting" when its valence is 0.22 would pass. Entity
+grounding is a floor, not a guarantee of truthfulness.
+
+**Strict quoting can trigger unnecessary fallbacks.** The verifier treats any
+quoted string that is not a retrieved title or artist as a fabrication, which
+depends on the model honoring the instruction to quote nothing else. A model
+that quotes a phrase for emphasis will fail verification and be replaced by the
+template even though it invented nothing. This is a deliberate bias toward the
+safe generator: a needless fallback costs some narrative quality, while a
+missed fabrication costs the user's trust.
 
 ---
 
@@ -279,10 +317,12 @@ mode would currently reach the user unflagged.
    that would unlock the strategy comparison, diversity re-ranking, and the
    High confidence band simultaneously. Everything else is secondary.
 
-2. **Verify LLM output against the retrieved set.** Extract quoted song titles
-   from the narrative and assert each appears in the top-k that was passed in —
-   the same grounding check the template generator already passes. This closes
-   the one place where an unverified claim can reach the user.
+2. **Verify the narrative's characterizations, not just its entities.**
+   Verification now catches fabricated songs, artists, and scores
+   (Experiment E). It does not check whether the adjectives match the data. A
+   narrative calling a valence-0.22 track "uplifting" passes today. Comparing
+   claimed descriptors against the song's actual feature values would close
+   the remaining gap.
 
 3. **Score the five ignored profile fields**, reusing the existing proximity
    formula. Small change, direct benefit to lofi, ambient, and classical
@@ -321,3 +361,14 @@ returned a 401 error string where a narrative should have been. Building the
 offline fallback was originally a workaround. It ended up being the more
 defensible design — the system now runs for anyone who clones it, and it never
 passes template output off as model output.
+
+The verification loop changed how I think about prompt instructions. The
+earlier version of this system had a prompt that said "do not invent songs,"
+and I had written in this very document that the narrative was "grounded." It
+was not. It was *requested* to be grounded, which is a different claim, and I
+had no way to tell the difference because nothing checked. Writing
+`verify_narrative()` meant deciding what evidence would actually settle the
+question — and the answer turned out to require changing the prompt too,
+reserving quotes for titles so the check could be mechanical instead of
+guesswork. An instruction you cannot verify is a hope. The gap between those
+two things is invisible until you build the check.

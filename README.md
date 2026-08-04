@@ -49,6 +49,39 @@ the retrieved evidence, and instructs the model to be honest about weak picks.
 This is genuine retrieval-grounded generation: change the retrieval, and the
 narrative changes with it.
 
+### Agentic verify-and-correct loop
+
+A prompt asking for grounding is a request, not a guarantee. The system
+**checks whether the model complied**, and acts on the answer:
+
+1. **Generate** a narrative from the retrieved songs
+2. **Verify** it — every quoted song title and artist must exist in the
+   retrieved set, and every cited score must match a real one
+3. **Correct** — if verification fails, retry once with the specific violation
+   quoted back to the model
+4. **Escalate** — if the retry also fails, discard the model output entirely
+   and fall back to the deterministic generator
+
+The model plans, acts, and checks its own work, with a safe path when
+self-correction doesn't succeed. Observed behavior across all four paths:
+
+| Model behavior | Calls | Result |
+|---|---|---|
+| Stays grounded | 1 | `gemini:... (verified (2 entities, 0 scores))` |
+| Names "Purple Rain", then corrects | 2 | `gemini:... (verified, after 1 correction)` |
+| Names "Bohemian Rhapsody" twice | 2 | `template (failed verification: unsupported entities: "Bohemian Rhapsody")` |
+| Invents a score of 9.99 | 2 | `template (failed verification: unsupported scores: 9.99)` |
+
+In the failing cases the fabricated song never reaches the user.
+
+**Why the quoting rule exists.** The prompt reserves double quotes for song
+titles and artist names only. That contract is what makes the check reliable
+rather than heuristic — any other quoted string is a fabrication, not a
+guess. The tradeoff is deliberate: if the model quotes a phrase for emphasis
+despite the instruction, the system falls back to the template rather than
+risk passing an unverified claim through. Erring toward the safe generator is
+the correct bias for a trustworthiness feature.
+
 ### Reliability and Testing System
 
 | Component | What it does |
@@ -57,8 +90,9 @@ narrative changes with it.
 | `confidence_score()` | Scores 0–1 how well the returned playlist matched the stated genre, mood, and energy |
 | `confidence_label()` | Buckets that into High / Medium / Low so the user sees it at a glance |
 | Adversarial profiles | Three profiles designed to stress specific weaknesses, run as a reliability report in mode 3 |
+| `verify_narrative()` | Checks generated narratives against the retrieved songs; unverifiable output never reaches the user |
 | `log_run()` | Appends a structured JSON record of every run for later review |
-| 46 automated tests | Cover validation boundaries, confidence math, narrative grounding, and API-failure fallback |
+| 70 automated tests | Cover validation boundaries, confidence math, narrative grounding, the correction loop, and API-failure fallback |
 
 ---
 
@@ -185,6 +219,8 @@ The system is designed so that **no single failure stops a run**:
 | No `GEMINI_API_KEY` | Narrative mode uses the offline template generator |
 | Gemini API error, timeout, or 401 | Caught, falls back to template, error type surfaced in the source tag |
 | Model returns empty text | Treated as failure, falls back to template |
+| Model names a song that was never retrieved | Caught by verification, one corrective retry, then template fallback |
+| Model cites a score that does not exist | Caught by verification, same correction path |
 | Windows `cp1252` console | stdout forced to UTF-8 so the CLI renders identically cross-platform |
 
 Every run is appended to `logs/recommendations.log` as one JSON object per line:
@@ -205,18 +241,21 @@ Every run is appended to `logs/recommendations.log` as one JSON object per line:
 pytest
 ```
 
-46 tests, all passing:
+70 tests, all passing:
 
 | File | Covers |
 |---|---|
 | `tests/test_recommender.py` | Core ranking and explanation behavior |
 | `tests/test_guardrails.py` | Validation boundaries, confidence math, label thresholds |
 | `tests/test_narrative.py` | Narrative grounding, honesty about weak picks, API-failure fallback |
+| `tests/test_verifier.py` | Quote and score extraction, fabrication detection, the correction loop |
 | `tests/test_logger.py` | Audit trail format, append behavior, timezone-aware timestamps |
 
-The narrative tests include a **grounding check** — every song title the
-generator quotes must have come from the retrieved input, so the test fails if
-the generator ever invents a song.
+The verifier tests drive the correction loop with scripted model responses, so
+the fabrication path is exercised without needing a live API. The key test is
+`test_unverifiable_output_never_reaches_the_user` — it asserts that a model
+insisting on a song that was never retrieved results in that song being absent
+from what the user sees.
 
 ---
 
@@ -234,9 +273,10 @@ applied-ai-system-final/
 │   ├── main.py                # CLI: three modes, wires everything together
 │   ├── recommender.py         # Scoring strategies, ranking, diversity re-rank
 │   ├── guardrails.py          # Input validation + confidence scoring
-│   ├── llm_client.py          # RAG generation + offline fallback
+│   ├── llm_client.py          # RAG generation + verify-and-correct loop
+│   ├── verifier.py            # Grounding checks on generated narratives
 │   └── logger.py              # JSON audit trail
-├── tests/                     # 46 tests
+├── tests/                     # 70 tests
 ├── logs/                      # Created on first run (gitignored)
 ├── model_card.md              # Limitations, bias analysis, evaluation
 ├── ai_interactions.md         # AI-assisted development log
@@ -260,6 +300,13 @@ full analysis.
 - **Confidence is a heuristic, not a calibrated probability.** It measures
   agreement with the stated profile, not whether the listener will actually
   enjoy the songs.
-- **The LLM narrative is grounded but not verified.** The prompt forbids
-  inventing songs and the tests check the template generator for grounding, but
-  the model's output is not automatically fact-checked against the retrieved set.
+- **Verification covers entities and scores, not reasoning.** The verifier
+  catches a fabricated song, artist, or score. It cannot catch a narrative that
+  names only real songs but describes them inaccurately — claiming a track is
+  "upbeat" when its valence is 0.22, for instance. Entity grounding is a floor,
+  not a guarantee of truthfulness.
+- **Strict quoting can cause unnecessary fallbacks.** If the model quotes a
+  phrase for emphasis despite being told not to, verification fails and the
+  system falls back to the template even though nothing was fabricated. This
+  trades some narrative quality for the guarantee that unverified claims are
+  never shown.

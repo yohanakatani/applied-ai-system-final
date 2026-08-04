@@ -20,6 +20,8 @@ template output as model output.
 
 import os
 
+from src.verifier import verify_narrative
+
 # Overridable so the project can be pointed at a different Gemini model
 # without editing code: set GEMINI_MODEL in .env.
 DEFAULT_MODEL_NAME = "gemini-2.0-flash"
@@ -137,21 +139,15 @@ class GeminiClient:
         self.model_name = os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME)
         self.client = genai.Client(api_key=api_key)
 
-    def explain_playlist(self, user_prefs: dict, recommendations: list) -> tuple:
+    def _build_prompt(self, user_prefs: dict, recommendations: list) -> str:
         """
-        RAG generation step: ground a natural-language narrative in the songs
-        the recommender actually retrieved.
+        Compose the grounded generation prompt.
 
-        recommendations: list of (song_dict, score, explanation) tuples.
-
-        Returns (narrative, source) where source is "gemini" on success, or
-        "template (API error: ...)" if the call failed and the deterministic
-        generator was used instead. Never raises.
+        The quoting rule matters: reserving double quotes for titles and
+        artists is what lets verify_narrative() treat any other quoted string
+        as a fabrication instead of guessing.
         """
-        if not recommendations:
-            return ("No songs matched your preferences well enough to describe.", "none")
-
-        prompt = f"""You are a music curator explaining a personalized playlist to a listener.
+        return f"""You are a music curator explaining a personalized playlist to a listener.
 
 The listener asked for:
 - Genre: {user_prefs.get('favorite_genre', 'any')}
@@ -168,21 +164,78 @@ Rules:
 - Use only the songs and score breakdowns listed above. Do not invent songs,
   artists, albums, or musical details that are not shown.
 - Refer to at least two songs by name.
+- Put double quotes around song titles and artist names, and around nothing
+  else. Do not use double quotes for emphasis or for any other phrase.
+- If you cite a score, use the exact number shown above.
 - If a pick is a weak or off-target match, say so honestly and explain what
   earned it a place anyway.
 - End with one sentence on when or where this playlist would work best.
 """
 
+    def _generate(self, prompt: str) -> str:
+        """One raw model call. Returns stripped text, possibly empty."""
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+        )
+        return (response.text or "").strip()
+
+    def explain_playlist(self, user_prefs: dict, recommendations: list) -> tuple:
+        """
+        RAG generation with a verify-and-correct loop.
+
+        Generates a narrative, checks it against the retrieved songs, and if
+        the model named something it was never given, retries once with the
+        specific violation quoted back to it. If the retry still fails
+        verification, falls back to the deterministic generator rather than
+        showing the user an unverifiable claim.
+
+        recommendations: list of (song_dict, score, explanation) tuples.
+
+        Returns (narrative, source). The source always states which generator
+        produced the text and whether it passed verification. Never raises.
+        """
+        if not recommendations:
+            return ("No songs matched your preferences well enough to describe.", "none")
+
+        prompt = self._build_prompt(user_prefs, recommendations)
+
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-            )
-            text = (response.text or "").strip()
+            text = self._generate(prompt)
             if not text:
                 narrative, _ = build_fallback_narrative(user_prefs, recommendations)
                 return (narrative, "template (model returned empty response)")
-            return (text, f"gemini:{self.model_name}")
+
+            result = verify_narrative(text, recommendations)
+            if result.ok:
+                return (text, f"gemini:{self.model_name} ({result.summary()})")
+
+            # The model named something outside the retrieved set. Tell it
+            # exactly what, and give it one chance to correct itself.
+            retry_prompt = (
+                f"{prompt}\n"
+                f"Your previous attempt failed verification: {result.summary()}.\n"
+                f"Those do not appear in the retrieved songs above. Rewrite the "
+                f"narrative using only the songs, artists, and scores listed, "
+                f"and quote nothing else."
+            )
+
+            retry_text = self._generate(retry_prompt)
+            if retry_text:
+                retry_result = verify_narrative(retry_text, recommendations)
+                if retry_result.ok:
+                    return (
+                        retry_text,
+                        f"gemini:{self.model_name} "
+                        f"({retry_result.summary()}, after 1 correction)",
+                    )
+
+            # Two failed attempts. Do not show the user unverifiable output.
+            narrative, _ = build_fallback_narrative(user_prefs, recommendations)
+            return (
+                narrative,
+                f"template (model output failed verification: {result.summary()})",
+            )
 
         except Exception as e:
             # Never let an API failure break the run. Fall back to the
