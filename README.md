@@ -440,9 +440,14 @@ built the check. That gap between an instruction and a guarantee is invisible
 from the inside, and closing it required changing the prompt so the guarantee
 could be enforced mechanically.
 
-> **Responsible-AI reflection** — how I collaborated with AI tools, a helpful
-> suggestion and a flawed one, and the system's limitations and biases — is in
-> [`model_card.md`](model_card.md), sections 6 and 8.
+> **Responsible-AI reflection and ethics** is in
+> [`model_card.md`](model_card.md), section 8:
+>
+> - **8.1** Limitations and biases (full analysis in section 6)
+> - **8.2** How this system could be misused, and what resists it
+> - **8.3** What surprised me while testing reliability
+> - **8.4** Collaborating with AI — one helpful suggestion, one flawed
+> - **8.5** What the project taught me
 
 ---
 

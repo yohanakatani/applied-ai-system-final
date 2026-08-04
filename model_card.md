@@ -338,9 +338,129 @@ missed fabrication costs the user's trust.
 
 ---
 
-## 8. Reflection and AI Collaboration
+## 8. Reflection and Ethics
 
-### How I worked with AI tools
+### 8.1 What are the limitations and biases in this system?
+
+Section 6 covers these in full. The short version, in order of severity:
+
+**Catalog sparsity is the dominant bias, and it is a data problem wearing a
+scoring problem's clothes.** Nine of thirteen genres have exactly one song. A
+listener who prefers any of them gets one genuine match and four songs selected
+on numeric proximity alone. This single fact explains three separate findings:
+the scoring strategies cannot differentiate (Experiment A), diversity
+re-ranking has nothing to penalize (Experiment B), and High confidence is
+unreachable (Experiment C). No amount of weight tuning fixes any of them.
+
+**The genre bonus structurally outweighs mood** by 4× (+2.0 against −0.5), so a
+wrong-mood song from the right genre beats a right-mood song from a neighboring
+one. Profile 1 demonstrates it: a pop/intense gym track ranks #2 for a listener
+who asked for pop/happy.
+
+**Mood is binary.** "angry" and "intense" are penalized exactly as hard as
+"angry" and "chill," despite describing far more similar listening experiences.
+
+**Confidence measures agreement, not enjoyment.** It compares results against
+the *stated* profile. A listener who describes their taste inaccurately gets a
+confident playlist they dislike, and the system cannot detect this.
+
+**Verification covers entities, not characterizations.** A narrative naming
+only real songs but calling a valence-0.22 track "uplifting" passes. Entity
+grounding is a floor.
+
+A bias worth naming that is *not* in the data: the weights encode one person's
+assumptions about what matters in music. Deciding that genre is worth 2.0 and
+mood 1.0 is a taste judgment presented as arithmetic. The explanation strings
+make the arithmetic visible, but they do not make it neutral.
+
+### 8.2 Could this system be misused, and how would I prevent it?
+
+**The most serious risk is undisclosed ranking manipulation, and this system's
+explainability makes it worse rather than better.** The scoring weights are
+class attributes in `recommender.py`. Someone deploying this could add a term
+favoring specific artists — a label paying for placement — and the system would
+keep emitting confident, legitimate-looking reasons for every pick. A
+manipulated ranking that explains itself fluently is more persuasive than a
+manipulated ranking that stays silent. Explanation is a trust-building
+mechanism, which makes it a trust-exploiting mechanism in the wrong hands.
+
+What already resists this: explanation strings are built *inside* the scoring
+function, at the moment each point is awarded, so the displayed reason cannot
+diverge from the computation without editing both. `log_run()` records the
+strategy used and the resulting picks, so patterns are auditable after the
+fact.
+
+What does not resist it, honestly: **the log records the strategy's name, not
+its weights.** A modified `GenreFirstScorer` would still log as
+`"genre-first"` while behaving differently. The fix is to log the actual weight
+vector with each run so the audit trail captures what the system did rather
+than what it called itself. I would consider this required before any real
+deployment.
+
+**Second risk: stripping the confidence signal.** A Low-confidence 43% playlist
+still receives a well-written narrative. Anyone building a UI on this could
+display the narrative and omit the confidence label, converting an honest
+"we can't serve you well" into an unqualified recommendation. Confidence is
+computed independently of the narrative and logged separately, but nothing
+forces a downstream interface to show it. A stricter design would refuse to
+emit a narrative at all below a confidence floor, rather than trusting the
+caller to display the caveat.
+
+**Third risk: repurposing the generator for promotional copy.** The narrative
+layer is a fluent music-writing engine. This is the risk the architecture
+handles best: the generator only ever receives retrieved catalog entries, and
+`verify_narrative()` rejects any output naming something outside that set. It
+structurally cannot write about a song that is not in the data.
+
+**Fourth risk: homogenization at scale.** The flat genre bonus concentrates
+listening toward whatever is well-represented in the catalog. Diversity
+re-ranking exists as a countermeasure but is nearly inert here (Experiment B),
+so it is a mitigation on paper more than in practice at this size.
+
+**A forward-looking one:** the catalog is synthetic and no personal data is
+collected, so privacy exposure is currently minimal. That changes the moment
+this runs on real listeners — `logs/recommendations.log` would become a record
+of individual taste profiles with timestamps. It would need retention limits
+and access controls, neither of which exist today because nothing yet warrants
+them.
+
+### 8.3 What surprised me while testing reliability?
+
+**That a working feature can accomplish almost nothing.** Experiment A was the
+genuinely uncomfortable result. Five scoring strategies, real differences in
+their weight vectors, careful implementation — and running the same profile
+through all five produced *one distinct set of songs*, at identical 43%
+confidence. Only the ordering changed. Nothing was broken; the code did exactly
+what it claimed. The catalog simply never handed it a decision to make.
+
+What makes this the most useful thing I learned is how nearly I missed it. The
+obvious test is whether the strategies produce different rankings — and they
+do, so that test passes and reports success. Measuring the *set* rather than
+the *ordering* is what exposed it. The assertion you reach for first is often
+the one that confirms what you already believe.
+
+**That a scoring band could be unreachable.** I expected the confidence
+thresholds to be roughly calibrated. Sweeping all 312 genre × mood × k
+combinations returned exactly one that reached High. Watching a single profile
+as k shrinks explained why — 99% at k=1, 86% at k=3, 67% at k=5 — because the
+largest genre+mood pair in the catalog is two songs, so any request for five
+results must pad the tail with partial matches. The thresholds were fine. The
+band was dead at the size the system actually runs.
+
+**That my documentation was confidently wrong.** The previous model card cited
+Sunrise City at 5.74 against a current 9.14. Nothing had regressed; the
+Challenge 1 attributes had added scoring signals and the document had never
+been re-measured. I also had Porch Light's energy recorded as 0.38 when the CSV
+says 0.33 — caught only because I checked my own draft against the data.
+
+**That reading code finds almost nothing.** Every real defect surfaced on
+execution: both inherited tests failing because `Song` required fields they
+never passed, the `UnicodeEncodeError` that killed the Windows CLI mid-print,
+the 401 from a credential that was never an API key, and the first version
+printing an exception string under the heading **AI Playlist Narrative**. I had
+read all of that code. None of it looked wrong.
+
+### 8.4 How I collaborated with AI tools
 
 I used an AI coding assistant throughout this build, in a pattern that settled
 into: describe the goal, let it draft, then **run the result before believing
@@ -355,7 +475,7 @@ profiles and experiments meant to *break* the recommender rather than confirm
 it worked. That produced Experiments A through C, two of which found genuine
 problems I would not have gone looking for.
 
-### An AI suggestion that was genuinely helpful
+#### An AI suggestion that was genuinely helpful
 
 When I decided to verify the LLM narrative against the retrieved songs, my
 plan was to write a checker that extracted quoted song titles and looked them
@@ -371,7 +491,7 @@ turned an unreliable heuristic into a lookup, and it is the reason
 `verify_narrative()` works at all. It reframed the problem: the check and the
 prompt are one mechanism, not a checker bolted onto an existing prompt.
 
-### An AI suggestion that was flawed
+#### An AI suggestion that was flawed or incorrect
 
 When adding LLM support, the assistant proposed reusing the `llm_client.py`
 from my Module 4 project wholesale — carrying over both the model name
@@ -404,37 +524,28 @@ faithfully, including the parts that were already broken, and will describe the
 result confidently. Inherited code is not verified code. Neither is generated
 code, and neither is documentation about code that has never been run.
 
-### What the project taught me
+### 8.5 What this project taught me about AI and problem-solving
 
 The most valuable thing this version added was not the RAG narrative — it was
-the confidence score, because it turned a silent failure into a visible one.
-Version 1.0 returned five songs for a rock listener with exactly the same
-presentation it used for a lofi listener, even though it could genuinely serve
-one and not the other. The ranking was never the problem. The absence of any
-signal about ranking *quality* was.
+the confidence score, because it converted a silent failure into a visible one.
+Version 1.0 presented a rock listener's five results exactly as it presented a
+lofi listener's, though it could genuinely serve one and not the other. The
+rankings were never wrong. The absence of any signal about ranking *quality*
+was the actual defect, and it took building the measurement to see it.
 
-Experiment A was the uncomfortable one. Five scoring strategies, real
-differences in their weights, careful implementation — and they produce one
-distinct set of songs. Nothing was broken. The code did exactly what it said.
-The catalog just never gave it a decision to make. It is easy to mistake
-engineering effort for capability, and the only reason that mistake surfaced
-here is that the evaluation measured the *set* of results and not just the
-ordering.
+The verification work changed how I read prompt instructions. This document
+previously said the narrative was "grounded." It was not. It was *requested* to
+be grounded, which is a different claim, and I could not tell the difference
+because nothing checked. Building `verify_narrative()` meant deciding what
+evidence would settle the question — and the answer required changing the
+prompt too, so the check could be mechanical rather than guesswork. An
+instruction you cannot verify is a hope.
 
-The graceful-degradation work came out of a genuine failure: the API key
-inherited from Module 4 turned out to be expired, and the first end-to-end run
-returned a 401 error string where a narrative should have been. Building the
-offline fallback was originally a workaround. It ended up being the more
-defensible design — the system now runs for anyone who clones it, and it never
-passes template output off as model output.
-
-The verification loop changed how I think about prompt instructions. The
-earlier version of this system had a prompt that said "do not invent songs,"
-and I had written in this very document that the narrative was "grounded." It
-was not. It was *requested* to be grounded, which is a different claim, and I
-had no way to tell the difference because nothing checked. Writing
-`verify_narrative()` meant deciding what evidence would actually settle the
-question — and the answer turned out to require changing the prompt too,
-reserving quotes for titles so the check could be mechanical instead of
-guesswork. An instruction you cannot verify is a hope. The gap between those
-two things is invisible until you build the check.
+The broader pattern across all of it: I was repeatedly wrong in the direction
+of assuming things worked. The inherited tests, the Windows CLI, the API key,
+the scoring strategies, my own model card. In every case the code looked
+correct and the documentation sounded confident. What separated the working
+parts from the broken ones was never how carefully they were written — it was
+whether anyone had run them and checked the result against something
+independent. Building the AI features was the easy half of this project.
+Establishing that they actually did what I claimed was the real work.
