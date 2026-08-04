@@ -1,0 +1,33 @@
+flowchart TD
+    A([User Input\ngenre · mood · energy\nacoustic · valence · tempo]) --> B[UserProfile]
+
+    B --> C{Scoring\nStrategy}
+
+    C --> C1[Balanced]
+    C --> C2[Genre-First]
+    C --> C3[Mood-First]
+    C --> C4[Energy-Focused]
+    C --> C5[Vibe-Match]
+
+    D[(songs.csv\nCatalog — 18 songs\ngenre · mood · energy\nvalence · tempo · BPM\nacousticness · loudness)] --> E[load_songs]
+    E --> F[Song Dicts]
+
+    F --> G[score_song\nper-song scoring loop]
+    C1 & C2 & C3 & C4 & C5 --> G
+
+    G --> H[Scored + Ranked List]
+
+    H --> I{Diversity\nPenalty?}
+    I -- yes --> J[diversify\ngreedy re-rank\nartist · genre penalty]
+    I -- no --> K[Top-K Slice]
+    J --> K
+
+    K --> L[Recommendations\nTitle · Score · Explanation]
+
+    L --> M([User\nsees results +\nwhy each song ranked])
+
+    style A fill:#d0e8ff,stroke:#5599cc
+    style M fill:#d0e8ff,stroke:#5599cc
+    style D fill:#fff3cd,stroke:#cc9900
+    style G fill:#e8f5e9,stroke:#2e7d32
+    style J fill:#fce4ec,stroke:#c62828
