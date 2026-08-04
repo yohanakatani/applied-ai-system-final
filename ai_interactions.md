@@ -532,6 +532,66 @@ summary.
 
 ---
 
+## Stretch: Few-Shot Specialization — and a Metric That Flattered Me
+
+**What task did you give the agent?**
+
+Control the narrative's voice with few-shot examples, and prove the output
+measurably differs rather than asserting it.
+
+**What the agent generated or changed:**
+
+- `src/personas.py` — Baseline, Concise DJ, Analytical, Warm Guide. Each
+  defined by a short instruction plus two worked examples, since showing two
+  concise outputs constrains length, rhythm, and structure at once in a way
+  the adjective "concise" does not.
+- `measure_style()` — word count, sentence length, number and second-person
+  usage, as counts and as per-word densities.
+- `scripts/compare_personas.py` — runs one playlist through every persona.
+
+**What was verified manually:**
+
+- **The examples had to obey the quoting contract themselves.** They quote only
+  titles and artists, so they reinforce the verifier's rule by demonstration
+  instead of undermining it. Asserted in
+  `test_examples_obey_the_quoting_contract`.
+
+- **Grounding survives every persona.** `test_grounding_rules_survive_every_persona`
+  checks the anti-fabrication rules appear in the prompt for all four styles,
+  and all four passed live verification in both runs. Style is the only thing
+  the persona is allowed to change.
+
+- **I ran it twice, and one finding did not replicate.** The first run showed
+  Analytical with the highest *number density* at 7.14%, and I wrote that into
+  the README. The second run put Concise ahead at 7.32%.
+
+  | Persona | Words r1/r2 | Numbers r1/r2 | Density r1/r2 |
+  |---|---|---|---|
+  | Concise | 36 / 41 | 2 / 3 | 5.56% / **7.32%** |
+  | Analytical | 70 / 70 | 5 / 5 | **7.14%** / 7.14% |
+
+  Concise never cited more numbers than Analytical. Density is
+  numbers-per-word, so Concise's brevity — the very thing that persona is *for*
+  — shrank the denominator and inflated the ratio. The metric I had chosen to
+  demonstrate the effect was partly measuring a different effect.
+
+  The absolute count separates the personas cleanly in both runs, so that is
+  what the README now reports, with the failed claim documented rather than
+  quietly replaced.
+
+- **What did replicate:** Concise at 49% and 48% of baseline word count and the
+  shortest sentences; Analytical using the most numbers (5 in both runs); Warm
+  using zero numbers in both runs and the most second-person address. Analytical
+  produced byte-identical metrics across both runs, suggesting near-deterministic
+  output for that prompt.
+
+**The lesson:** I nearly shipped a claim supported by one sample of stochastic
+output, measured with a statistic that was confounded by the variable the
+persona was designed to change. Running it a second time cost about a minute
+and was the only reason I found out.
+
+---
+
 ## Bugs Found by Running the System
 
 Recorded separately because every one of these was invisible from reading the

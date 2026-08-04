@@ -145,8 +145,14 @@ def measure_style(text: str) -> Dict[str, float]:
     Quantify the stylistic properties a persona is meant to control.
 
     Returns metrics that should move in predictable directions if the few-shot
-    examples are doing anything: Concise should show the lowest word count,
-    Analytical the highest number density, Warm the highest second-person rate.
+    examples are doing anything: Concise the lowest word count, Analytical the
+    most numbers, Warm the most second-person address and no numbers at all.
+
+    Both absolute counts and per-word densities are reported. Prefer the counts
+    when comparing personas of different lengths — density divides by word
+    count, so a terse persona's brevity inflates its density even when it cites
+    fewer numbers than a verbose one. That confound made Concise appear more
+    number-heavy than Analytical in one run despite using fewer numbers.
     """
     words = _WORD.findall(text)
     sentences = [s for s in _SENTENCE.split(text) if s.strip()]

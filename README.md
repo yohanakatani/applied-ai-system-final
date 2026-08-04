@@ -134,17 +134,28 @@ Run it with **mode 4**.
 adjectives — "be concise" is a weak instruction; two concise outputs are a
 strong one. Same playlist, same grounding rules, four voices:
 
-| Persona | Words | Avg sentence | Number density | 2nd person | Verified |
-|---|---|---|---|---|---|
-| Baseline | 73 | 18.2 | 4.1% | 2.7% | yes |
-| **Concise** | **36** | **12.0** | 5.6% | 0.0% | yes |
-| **Analytical** | 70 | 17.5 | **7.1%** | 0.0% | yes |
-| **Warm** | 71 | 17.8 | **0.0%** | **4.2%** | yes |
+Measured over **two independent runs** on identical input, because a single
+sample of stochastic output is weak evidence:
 
-Each moved in its intended direction: Concise halved the word count,
-Analytical carried the highest number density, Warm used no numbers at all and
-the most second-person address. **Style changed; grounding did not** — all four
-passed verification.
+| Persona | Words (r1/r2) | Avg sentence | Numbers used | 2nd-person words | Verified |
+|---|---|---|---|---|---|
+| Baseline | 73 / 85 | 18.2 / 17.0 | 3 / 3 | 2 / 3 | yes |
+| **Concise** | **36 / 41** | **12.0 / 13.7** | 2 / 3 | 0 / 1 | yes |
+| **Analytical** | 70 / 70 | 17.5 / 17.5 | **5 / 5** | 0 / 0 | yes |
+| **Warm** | 71 / 70 | 17.8 / 17.5 | **0 / 0** | **3 / 4** | yes |
+
+**Replicated in both runs:** Concise roughly halves the word count (49%, 48% of
+baseline) and writes the shortest sentences. Analytical uses the most numbers.
+Warm uses none at all and the most second-person address. All four pass
+grounding verification — **style changed; grounding did not.**
+
+**Did not replicate:** an earlier draft of this table claimed Analytical had
+the highest *number density*. In the second run Concise edged it, 7.3% against
+7.1% — not because Concise cited more numbers, but because density is
+numbers-per-word and Concise's brevity inflates the denominator. The absolute
+count is the honest metric here, and it separates the personas cleanly in both
+runs. Kept as a note rather than quietly corrected, because it is a good
+example of a metric that flatters a conclusion.
 
 The difference is legible in how each handles the same weak pick:
 
