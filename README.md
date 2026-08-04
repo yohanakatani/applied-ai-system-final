@@ -142,6 +142,16 @@ GEMINI_MODEL=gemini-2.0-flash
 
 All transcripts below are real output from the current code.
 
+> **A note on the scores.** The same song scores differently depending on how
+> many preferences were supplied, because the score is a sum over whichever
+> signals the profile activates. The interactive CLI asks for four preferences
+> (genre, mood, energy, acoustic), so "Library Rain" scores **4.50** in Example
+> 1. The built-in evaluation profiles in Example 5 specify eleven — adding
+> valence, tempo, popularity, decade, detailed mood tag, and loudness — so six
+> more signals fire and the same song scores **9.86**. Scores are comparable
+> *within* a result set, which is all the ranking needs; they are not on a
+> fixed scale across profiles.
+
 ### Example 1 — A request the catalog can serve well
 
 **Input:** genre `lofi`, mood `chill`, energy `0.35`, acoustic `y`
